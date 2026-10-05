@@ -1,0 +1,67 @@
+{
+  "_example": "EXAMPLE ONLY: the role-based starting areas new_property.py writes to <workDir>/areas.json (this copy is generated from new_property.generic_areas, so the two agree). Tailor them to the rooms the plan actually has: drop areas with no rooms, split large ones, set the light budgets, and delete every \"_todo\". Fields: key (folder and owner name), prefix (unique id prefix ending in -), title, lights (real light sources budget), research (what to find), scope (what to model, where, and what to keep clear). Scopes name spec.json entries (rooms[].id, drawnItems, outerWalls/interiorWalls openings) instead of typing coordinates: spec.json is authoritative.",
+  "areas": [
+    {
+      "key": "exterior",
+      "prefix": "ex-",
+      "title": "Exterior",
+      "lights": 3,
+      "research": "exterior wall lights for each exterior door, an entrance or porch ceiling light, entrance door hardware, house numbers, outdoor planters and plants that suit the climate; a roofing product and a cladding product for the shopping notes",
+      "scope": "Roof over the whole spec.json footprint in a form that suits the exterior style (simple gable-roofed cottage, light siding, dark window casings): roof covering as instanced courses or panels, eaves, soffits, fascia, gutters and downpipes, and any gable or parapet infill between the ceiling and the roof. Cladding on the outside faces of spec.outerWalls with every opening left clear; a plinth from spec.grade.y to y=0; exterior window and door casings. An entrance step or porch at the main entrance door in spec.outerWalls, and a step at every other exterior door. Ground plane at grade around the house, a path to the entrance, planting. Exterior lights with real light sources. Roof, soffit, infill and porch-roof nodes use behavior cutaway hide and no collision. Nothing inside the footprint.",
+      "_todo": "Choose the roof form and whether there is a porch from the plan and style; drop the porch if the entrance has none."
+    },
+    {
+      "key": "finishes",
+      "prefix": "fl-",
+      "title": "Floors and finishes",
+      "lights": 0,
+      "research": "a dry-room floor finish (plank, engineered wood, laminate or similar), a wet-room floor tile, a wall tile for wet areas, the main wall paint and an accent colour, a skirting and door casing profile",
+      "scope": "Floor finish in every dry room in spec.rooms (instanced planks or tiles a few mm thick at y 0.000-0.003, no collision, raycast false); tile with a darker grout underlay in each wet room (bathrooms, laundry, utility), tops >= 2 mm apart. Skirting along every interior wall face, skipping door openings and the runs behind built-ins in spec.drawnItems. Casings on both faces of every interior opening. A ceiling per room at the ceiling height (cutaway hide, raycast false, no collision). At most one accent wall. No finishes outside the footprint."
+    },
+    {
+      "key": "kitchen",
+      "prefix": "kt-",
+      "title": "Kitchen",
+      "lights": 3,
+      "research": "base and wall cabinets from one real cabinet line, a worktop, a backsplash, a cooker or hob and oven, an extractor hood, a fridge, a dishwasher, a sink and tap, bar stools if there is an island or peninsula, pendant or ceiling lights",
+      "scope": "The kitchen room or zone in spec.rooms: cabinet runs along the kitchen run(s) in spec.drawnItems, with each appliance and the sink at its drawn item where one is drawn (otherwise a sensible position on the run, recorded as an assumption). Wall cabinets above the runs except over windows, a hood over the cooker. An island or peninsula only if spec.drawnItems has one, with seating if it overhangs. Ceiling or pendant lights with real light sources. Keep >= 1.0 m between facing runs and every doorway in spec.interiorWalls and spec.outerWalls next to the kitchen clear.",
+      "_todo": "Keep if the plan has a kitchen; if it is a small part of an open room, consider merging it into living. Name the kitchen drawn items here once spec.json has them."
+    },
+    {
+      "key": "living",
+      "prefix": "lv-",
+      "title": "Living and dining",
+      "lights": 3,
+      "research": "a sofa sized to the room, a coffee table, accent chairs, an area rug, a media unit and TV, a floor lamp, curtains or blinds and rods, framed art, plants, a dining table and chairs for the space, a dining pendant",
+      "scope": "Every living, family and dining room or zone in spec.rooms: seating at the drawn sofa and chair items in spec.drawnItems where drawn, a rug under the seating group, media unit, lamp, window dressings on the windows of those rooms (spec.outerWalls openings), art (layers >= 2 mm apart), plants. Dining table and chairs centred in the dining zone with a pendant (real light source). Items not drawn on the plan are proposed additions, recorded as assumptions. Keep a clear route from the entrance to every door and the kitchen, and keep every door swing clear.",
+      "_todo": "Drop the dining part if the plan has no dining space; split into two areas if living and dining are separate rooms far apart."
+    },
+    {
+      "key": "bedrooms",
+      "prefix": "br-",
+      "title": "Bedrooms",
+      "lights": 3,
+      "research": "beds sized to each bedroom (a different style per room), bedding, nightstands, table lamps, rugs, a dresser or chest, a desk and chair for one room, wardrobe or closet fittings (rail and shelf or a system), curtains, ceiling lights",
+      "scope": "Each bedroom room in spec.rooms, and each closet room that opens off one: beds at the bed items in spec.drawnItems (headboard against the wall it is drawn on, below the sill if a window is behind it), nightstands at their drawn items, lamps, rugs, storage on a free wall clear of door and closet swings, window dressings, one ceiling light per bedroom. Closets: rail and shelf, walkways >= 0.6 m in walk-ins. Keep every door leaf and bifold in spec.interiorWalls clear.",
+      "_todo": "Set lights to the number of bedrooms. Split into a main-bedroom area and an other-bedrooms area if there are more than three bedrooms or a large walk-in closet."
+    },
+    {
+      "key": "bathrooms",
+      "prefix": "ba-",
+      "title": "Bathrooms",
+      "lights": 2,
+      "research": "a bath and/or shower tray and enclosure that fit the drawn space, bath/shower taps, a toilet, a vanity unit and basin tap, a mirror, a vanity or ceiling light, towel rails",
+      "scope": "Each bathroom, en-suite and WC room in spec.rooms: bath, shower, toilet and vanity at their drawn items in spec.drawnItems, tiled surround on the walls around the bath or shower (tile and grout layers >= 2 mm apart), taps and shower head, mirror and a light with a real light source per room. Keep each door leaf clear of the fixtures.",
+      "_todo": "Set lights to the number of bathrooms; split per bathroom if there are more than two."
+    },
+    {
+      "key": "utility",
+      "prefix": "ut-",
+      "title": "Laundry and utility",
+      "lights": 1,
+      "research": "a washing machine and dryer (or washer-dryer) that fit the drawn space, utility shelving or cabinets, a utility sink if drawn, a ceiling light",
+      "scope": "The laundry, utility, pantry and storage cupboard rooms in spec.rooms: appliances at their drawn items in spec.drawnItems, shelving above them, shelving behind cupboard bifolds, a light with a real light source. Keep the exterior door and every interior doorway into these rooms clear.",
+      "_todo": "Drop this area if the plan has no laundry, utility or storage rooms; otherwise list them here."
+    }
+  ]
+}

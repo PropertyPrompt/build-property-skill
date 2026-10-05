@@ -1,0 +1,8 @@
+{
+  "name": "build-property",
+  "description": "Build a complete PropertyPrompt property from a floor-plan image: measured shell, exterior, rooms furnished with researched real products, lighting, cameras and a rendered review, using staged multi-agent workflows.",
+  "version": "0.3.0",
+  "author": { "name": "PropertyPrompt" },
+  "repository": "https://github.com/PropertyPrompt/build-property-skill",
+  "license": "MIT"
+}

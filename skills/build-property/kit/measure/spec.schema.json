@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PropertyPrompt/build-property-skill/spec.schema.json",
+  "title": "Property build spec",
+  "description": "Measured shell of one storey, read from a floor plan. Metres; origin = outside north-west corner; +x east (plan right), +z south (plan down), y up; finished floor y = 0. measure_plan.py writes a draft (draft: true, review list); a person/assistant completes rooms, hinge sides, heights and ids; shell/shell.py builds the shell from it. Extra keys are allowed (style, materials, grade, idPrefixes ... are read by other kit parts).",
+  "type": "object",
+  "required": ["propertyId", "footprint", "ceilingHeight", "wallThickness", "heights", "outerWalls", "interiorWalls"],
+  "properties": {
+    "propertyId": {"type": "string"},
+    "draft": {"type": "boolean", "description": "true while the spec is a measure_plan.py draft that still needs review"},
+    "source": {
+      "type": "object",
+      "description": "Where the measurements come from and how pixels map to metres.",
+      "properties": {
+        "file": {"type": "string"},
+        "resolution": {"$ref": "#/$defs/pair"},
+        "crop": {"type": ["array", "null"], "items": {"type": "integer"}, "minItems": 4, "maxItems": 4},
+        "footprintPx": {
+          "type": "object",
+          "required": ["left", "top", "right", "bottom"],
+          "properties": {
+            "left": {"type": "integer"}, "top": {"type": "integer"},
+            "right": {"type": "integer", "description": "inclusive"}, "bottom": {"type": "integer", "description": "inclusive"},
+            "widthPx": {"type": "integer"}, "heightPx": {"type": "integer"}
+          }
+        },
+        "metresPerPixel": {
+          "type": "object", "required": ["x", "z"],
+          "properties": {"x": {"type": "number", "exclusiveMinimum": 0}, "z": {"type": "number", "exclusiveMinimum": 0}}
+        },
+        "scaleAgreement": {"type": "string"},
+        "conversion": {"type": "string"},
+        "measuredWith": {"type": "string"}
+      }
+    },
+    "axes": {"type": "string"},
+    "footprint": {"$ref": "#/$defs/pair", "description": "[width x, depth z] outside dimensions in metres"},
+    "ceilingHeight": {"type": "number", "exclusiveMinimum": 0},
+    "wallThickness": {
+      "type": "object", "required": ["outer", "interior"],
+      "properties": {
+        "outer": {"type": "number", "exclusiveMinimum": 0},
+        "interior": {"type": "number", "exclusiveMinimum": 0, "description": "default for interior walls without their own thickness"},
+        "note": {"type": "string"}
+      }
+    },
+    "heights": {
+      "type": "object", "required": ["door", "windowSill", "windowHead"],
+      "properties": {
+        "door": {"type": "number", "description": "default door head"},
+        "windowSill": {"type": "number"},
+        "windowHead": {"type": "number"},
+        "floorTop": {"type": "number"}
+      },
+      "additionalProperties": {"type": "number"}
+    },
+    "outerWalls": {
+      "type": "array",
+      "description": "Axis-aligned outer walls. An x-axis wall runs along x at constant z (north/south); a z-axis wall runs along z (west/east). Corners belong to the x-axis walls: z-axis walls are trimmed to their inner faces by shell.py.",
+      "items": {"$ref": "#/$defs/outerWall"}
+    },
+    "interiorWalls": {"type": "array", "items": {"$ref": "#/$defs/interiorWall"}},
+    "angledWalls": {
+      "type": "array",
+      "description": "Walls at an angle to x and z (shell.py does not build these; the shell modeller hand-models them from this list). Rooms they bound need a polygon.",
+      "items": {"$ref": "#/$defs/angledWall"}
+    },
+    "interiorDoors": {
+      "type": "object",
+      "description": "Defaults for every interior hinged door; an opening's own keys win",
+      "properties": {
+        "leafStyle": {"enum": ["shaker", "slab"], "description": "shaker = two recessed panels (default); slab = flat leaf"},
+        "leafMaterial": {"type": "string", "description": "material id for the leaf (default m-trim)"},
+        "hardwareMaterial": {"type": "string", "description": "material id for knobs and roses (default m-brass)"}
+      }
+    },
+    "rooms": {"type": "array", "items": {"$ref": "#/$defs/room"}},
+    "drawnItems": {
+      "type": "object",
+      "description": "Furniture/fixture footprints as drawn: id -> [x1, z1, x2, z2]",
+      "additionalProperties": {"$ref": "#/$defs/bounds"}
+    },
+    "idPrefixes": {"type": "object", "additionalProperties": {"type": "string"}},
+    "style": {"type": "object", "additionalProperties": {"type": "string"}},
+    "materials": {"type": "object", "additionalProperties": {"type": "string"}},
+    "grade": {"type": "object", "properties": {"y": {"type": "number"}, "note": {"type": "string"}}},
+    "review": {"type": "array", "items": {"type": "string"}, "description": "measure_plan.py uncertainties to resolve"},
+    "corrections": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "pair": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+    "bounds": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+    "id": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,80}$"},
+    "outerWall": {
+      "type": "object",
+      "required": ["id", "axis", "from", "to", "openings"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "axis": {"enum": ["x", "z"]},
+        "line_z_outer": {"type": "number", "description": "x-axis walls: z of the outside face"},
+        "inner_z": {"type": "number", "description": "x-axis walls: z of the inside face"},
+        "line_x_outer": {"type": "number", "description": "z-axis walls: x of the outside face"},
+        "inner_x": {"type": "number", "description": "z-axis walls: x of the inside face"},
+        "from": {"type": "number"},
+        "to": {"type": "number"},
+        "openings": {"type": "array", "items": {"$ref": "#/$defs/opening"}},
+        "pixels": {"type": "object"}
+      },
+      "if": {"properties": {"axis": {"const": "x"}}},
+      "then": {"required": ["line_z_outer", "inner_z"]},
+      "else": {"required": ["line_x_outer", "inner_x"]}
+    },
+    "angledWall": {
+      "type": "object",
+      "required": ["id", "start", "end", "thickness", "kind", "openings"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["outer", "interior"]},
+        "start": {"$ref": "#/$defs/pair", "description": "[x, z] of one end: interior walls the centreline; outer walls the outside face, with the thickness on the side towards the inside of the footprint"},
+        "end": {"$ref": "#/$defs/pair", "description": "[x, z] of the other end"},
+        "thickness": {"type": "number", "exclusiveMinimum": 0},
+        "openings": {"type": "array", "items": {"$ref": "#/$defs/opening"},
+                     "description": "from/to are distances along the wall from start, not coordinates"},
+        "note": {"type": "string"}
+      }
+    },
+    "interiorWall": {
+      "type": "object",
+      "required": ["id", "axis", "from", "to", "openings"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "axis": {"enum": ["x", "z"]},
+        "center_z": {"type": "number", "description": "x-axis walls: centreline z"},
+        "center_x": {"type": "number", "description": "z-axis walls: centreline x"},
+        "from": {"type": "number", "description": "start along the axis; may stop at the face or the centreline of the wall it meets (shell.py snaps to the face)"},
+        "to": {"type": "number"},
+        "thickness": {"type": "number", "exclusiveMinimum": 0},
+        "openings": {"type": "array", "items": {"$ref": "#/$defs/opening"}},
+        "ends": {"type": "array", "items": {"type": "string"}, "description": "measure_plan.py: what each end met (outer:<side>, interior, free)"},
+        "pixels": {"type": "object"}
+      },
+      "if": {"properties": {"axis": {"const": "x"}}},
+      "then": {"required": ["center_z"]},
+      "else": {"required": ["center_x"]}
+    },
+    "opening": {
+      "type": "object",
+      "required": ["id", "type", "from", "to"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"enum": ["window", "door", "bifold", "opening"], "description": "opening = cased gap (header, no leaf)"},
+        "from": {"type": "number", "description": "jamb at the smaller coordinate along the wall axis (west or north jamb)"},
+        "to": {"type": "number", "description": "jamb at the larger coordinate (east or south jamb)"},
+        "head": {"type": "number"},
+        "sill": {"type": "number", "description": "windows"},
+        "room": {"type": ["string", "null"], "description": "room the opening serves; interior doors/bifolds open into it"},
+        "swing": {"type": "string", "description": "free text read by shell.py: 'hinge on|at (the) <north|south|east|west> jamb'; outer doors 'inward'/'outward'; interior 'into <room id or name>'"},
+        "hinge": {"enum": ["from", "to"], "description": "structured hinge jamb; overrides the swing text"},
+        "swingSide": {"enum": ["interior", "exterior", "+x", "-x", "+z", "-z", "north", "south", "east", "west"],
+                      "description": "outer doors: interior|exterior; interior doors/bifolds: the side they open to; overrides room/text"},
+        "openDeg": {"type": "number", "minimum": 0, "maximum": 180, "description": "leaf drawn open this far (default: 90 for outer doors; widest angle <= 90 that clears the walls for interior doors)"},
+        "foldDeg": {"type": "number", "minimum": 0, "maximum": 90, "description": "bifold panel angle out of the wall plane (default: each panel projects <= 0.15 m)"},
+        "entrance": {"type": "boolean", "description": "outer door styled as the main entrance (walnut leaf, oak threshold); default when the id contains 'front'"},
+        "leafMaterial": {"type": "string"},
+        "leafStyle": {"enum": ["shaker", "slab"], "description": "interior doors; default spec.interiorDoors.leafStyle, else shaker"},
+        "hardwareMaterial": {"type": "string", "description": "interior doors: knobs and roses; default spec.interiorDoors.hardwareMaterial, else m-brass"},
+        "thresholdMaterial": {"type": "string"},
+        "label": {"type": "string"},
+        "note": {"type": "string"},
+        "openNote": {"type": "string"},
+        "detected": {"type": "object", "description": "measure_plan.py evidence (lines, leaf, marks)"},
+        "needsReview": {"type": "boolean"}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"const": "window"}}}, "then": {"required": ["sill", "head"]}}
+      ]
+    },
+    "room": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "name": {"type": "string"},
+        "bounds": {"$ref": "#/$defs/bounds", "description": "[x1, z1, x2, z2] interior faces (for a polygon room: its bounding box)"},
+        "polygon": {"type": "array", "items": {"$ref": "#/$defs/pair"}, "minItems": 3,
+                    "description": "[[x, z], ...] interior faces in order, for rooms that are not rectangles (L-shapes, angled walls); floors and ceilings follow it"},
+        "label": {"type": "string"},
+        "accessFrom": {"type": "string"},
+        "zones": {"type": "object"}
+      }
+    }
+  }
+}

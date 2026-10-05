@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+# local outputs (working files belong in ~/property-build-work/<propertyId>/)
+out/
+output/
+payloads/
+renders/
+validation/
+*.local.json

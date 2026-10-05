@@ -1,0 +1,395 @@
+{
+ "propertyId": "example-house",
+ "draft": false,
+ "source": {
+  "file": "tests/synthetic-plan.png (drawn by tests/make_synthetic_plan.py)",
+  "resolution": [
+   1200,
+   1000
+  ],
+  "crop": null,
+  "footprintPx": {
+   "left": 100,
+   "top": 100,
+   "right": 1099,
+   "bottom": 899,
+   "widthPx": 1000,
+   "heightPx": 800
+  },
+  "metresPerPixel": {
+   "x": 0.01,
+   "z": 0.01
+  },
+  "scaleAgreement": "x 0.010000 m/px, z 0.010000 m/px, differ by 0.00%",
+  "conversion": "X=(px-100)*0.010000, Z=(py-100)*0.010000 (original-resolution pixel edges)"
+ },
+ "axes": "origin = outside north-west corner; +x east (plan right), +z south (plan down), y up; metres",
+ "footprint": [
+  10.0,
+  8.0
+ ],
+ "ceilingHeight": 2.5,
+ "wallThickness": {
+  "outer": 0.2,
+  "interior": 0.14,
+  "note": "Synthetic example: outer walls 20 px, interior 14 px at 100 px/m."
+ },
+ "heights": {
+  "door": 2.03,
+  "windowSill": 0.9,
+  "windowHead": 2.1,
+  "floorTop": 0.0
+ },
+ "outerWalls": [
+  {
+   "id": "north",
+   "axis": "x",
+   "line_z_outer": 0.0,
+   "inner_z": 0.2,
+   "from": 0.0,
+   "to": 10.0,
+   "openings": [
+    {
+     "id": "win-bed1-n",
+     "type": "window",
+     "from": 1.2,
+     "to": 2.6,
+     "sill": 0.9,
+     "head": 2.1,
+     "room": "bedroom-1"
+    },
+    {
+     "id": "win-bath-n",
+     "type": "window",
+     "from": 4.6,
+     "to": 5.4,
+     "sill": 1.4,
+     "head": 2.1,
+     "room": "bathroom",
+     "note": "high sill for privacy"
+    },
+    {
+     "id": "win-bed2-n",
+     "type": "window",
+     "from": 7.2,
+     "to": 8.6,
+     "sill": 0.9,
+     "head": 2.1,
+     "room": "bedroom-2"
+    }
+   ]
+  },
+  {
+   "id": "south",
+   "axis": "x",
+   "line_z_outer": 8.0,
+   "inner_z": 7.8,
+   "from": 0.0,
+   "to": 10.0,
+   "openings": [
+    {
+     "id": "door-front",
+     "type": "door",
+     "from": 2.0,
+     "to": 2.95,
+     "head": 2.03,
+     "room": "living",
+     "hinge": "to",
+     "swingSide": "interior",
+     "swing": "inward, hinge on east jamb",
+     "entrance": true
+    },
+    {
+     "id": "win-living-s",
+     "type": "window",
+     "from": 4.2,
+     "to": 6.2,
+     "sill": 0.9,
+     "head": 2.1,
+     "room": "living"
+    },
+    {
+     "id": "win-kitchen-s",
+     "type": "window",
+     "from": 6.8,
+     "to": 7.8,
+     "sill": 1.05,
+     "head": 2.1,
+     "room": "living",
+     "note": "over the kitchen sink"
+    }
+   ]
+  },
+  {
+   "id": "west",
+   "axis": "z",
+   "line_x_outer": 0.0,
+   "inner_x": 0.2,
+   "from": 0.0,
+   "to": 8.0,
+   "openings": [
+    {
+     "id": "win-living-w",
+     "type": "window",
+     "from": 4.6,
+     "to": 5.8,
+     "sill": 0.9,
+     "head": 2.1,
+     "room": "living"
+    },
+    {
+     "id": "door-back",
+     "type": "door",
+     "from": 6.5,
+     "to": 7.4,
+     "head": 2.03,
+     "room": "living",
+     "hinge": "to",
+     "swingSide": "exterior",
+     "swing": "outward, hinge on south jamb"
+    }
+   ]
+  },
+  {
+   "id": "east",
+   "axis": "z",
+   "line_x_outer": 10.0,
+   "inner_x": 9.8,
+   "from": 0.0,
+   "to": 8.0,
+   "openings": [
+    {
+     "id": "win-bed2-e",
+     "type": "window",
+     "from": 1.0,
+     "to": 2.6,
+     "sill": 0.9,
+     "head": 2.1,
+     "room": "bedroom-2"
+    }
+   ]
+  }
+ ],
+ "interiorWalls": [
+  {
+   "id": "wall-a",
+   "axis": "x",
+   "center_z": 4.0,
+   "from": 0.2,
+   "to": 9.8,
+   "thickness": 0.14,
+   "openings": [
+    {
+     "id": "door-bed1",
+     "type": "door",
+     "from": 1.6,
+     "to": 2.45,
+     "head": 2.03,
+     "room": "bedroom-1",
+     "hinge": "from",
+     "swingSide": "-z",
+     "swing": "into bedroom 1, hinge on west jamb"
+    },
+    {
+     "id": "door-bath",
+     "type": "door",
+     "from": 4.5,
+     "to": 5.25,
+     "head": 2.03,
+     "room": "bathroom",
+     "hinge": "to",
+     "swingSide": "-z",
+     "swing": "into bathroom, hinge on east jamb"
+    },
+    {
+     "id": "door-bed2",
+     "type": "door",
+     "from": 7.0,
+     "to": 7.85,
+     "head": 2.03,
+     "room": "bedroom-2",
+     "hinge": "to",
+     "swingSide": "-z",
+     "swing": "into bedroom 2, hinge on east jamb"
+    }
+   ]
+  },
+  {
+   "id": "wall-b",
+   "axis": "z",
+   "center_x": 4.0,
+   "from": 0.2,
+   "to": 3.93,
+   "thickness": 0.14,
+   "openings": []
+  },
+  {
+   "id": "wall-c",
+   "axis": "z",
+   "center_x": 6.0,
+   "from": 0.2,
+   "to": 3.93,
+   "thickness": 0.14,
+   "openings": []
+  },
+  {
+   "id": "wall-d",
+   "axis": "z",
+   "center_x": 8.5,
+   "from": 4.07,
+   "to": 7.8,
+   "thickness": 0.14,
+   "openings": [
+    {
+     "id": "bifold-closet",
+     "type": "bifold",
+     "from": 5.0,
+     "to": 6.4,
+     "head": 2.03,
+     "room": "living",
+     "swingSide": "-x",
+     "note": "bifold closet doors opening into the living room"
+    }
+   ]
+  }
+ ],
+ "rooms": [
+  {
+   "id": "bedroom-1",
+   "name": "Bedroom 1",
+   "bounds": [
+    0.2,
+    0.2,
+    3.93,
+    3.93
+   ],
+   "label": "BEDROOM 1 3.73 x 3.73"
+  },
+  {
+   "id": "bathroom",
+   "name": "Bathroom",
+   "bounds": [
+    4.07,
+    0.2,
+    5.93,
+    3.93
+   ],
+   "label": "BATH"
+  },
+  {
+   "id": "bedroom-2",
+   "name": "Bedroom 2",
+   "bounds": [
+    6.07,
+    0.2,
+    9.8,
+    3.93
+   ],
+   "label": "BEDROOM 2 3.73 x 3.73"
+  },
+  {
+   "id": "living",
+   "name": "Living and kitchen",
+   "bounds": [
+    0.2,
+    4.07,
+    8.43,
+    7.8
+   ],
+   "label": "LIVING / KITCHEN",
+   "zones": {
+    "kitchen": [
+     6.0,
+     6.2,
+     8.43,
+     7.8
+    ],
+    "living": [
+     0.2,
+     4.07,
+     6.0,
+     7.8
+    ]
+   }
+  },
+  {
+   "id": "closet",
+   "name": "Closet",
+   "bounds": [
+    8.57,
+    4.07,
+    9.8,
+    7.8
+   ],
+   "label": "CLOSET",
+   "accessFrom": "living"
+  }
+ ],
+ "drawnItems": {
+  "bed-1": [
+   1.0,
+   0.2,
+   2.6,
+   2.3
+  ],
+  "bed-2": [
+   7.3,
+   0.2,
+   8.9,
+   2.3
+  ],
+  "vanity": [
+   4.07,
+   0.2,
+   4.9,
+   0.75
+  ],
+  "shower": [
+   5.03,
+   0.2,
+   5.93,
+   1.1
+  ],
+  "toilet": [
+   4.07,
+   1.6,
+   4.6,
+   2.3
+  ],
+  "sofa": [
+   0.4,
+   5.0,
+   1.3,
+   7.2
+  ],
+  "kitchen-run": [
+   6.4,
+   7.2,
+   8.43,
+   7.8
+  ]
+ },
+ "idPrefixes": {
+  "shell-outer": "so-",
+  "shell-inner": "si-",
+  "exterior": "ex-",
+  "finishes": "fl-",
+  "kitchen": "kt-",
+  "living": "lv-",
+  "bedrooms": "br-",
+  "bathrooms": "ba-",
+  "lighting": "lt-",
+  "library": "m-"
+ },
+ "style": {
+  "exterior": "Simple gable-roofed cottage: light siding with battens, dark window casings, dark shingle roof, small covered entrance porch.",
+  "interior": "Light and calm: pale wood floors, warm white walls, matte black and brass metal, natural textiles."
+ },
+ "grade": {
+  "y": -0.3,
+  "note": "Synthetic example: finished floor y=0, outside ground y=-0.30."
+ },
+ "corrections": [
+  "Synthetic example for the kit's self-test (tests/run_selftest.py). It describes a made-up house, not a real building."
+ ]
+}

@@ -1,0 +1,213 @@
+{
+ "_comment": "Shared m-* materials library. Publish once per property right after create_property with put_scene_resources {resources: [...]} (20 = one call). Neutral starting values; adjust colours to the property's style before publishing. Ids in this file are treated as external by payload.py.",
+ "resources": [
+  {
+   "id": "m-oak",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#c9a77c",
+    "roughness": 0.55,
+    "name": "Light white oak"
+   }
+  },
+  {
+   "id": "m-oak-dark",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#b8946a",
+    "roughness": 0.55,
+    "name": "Oak plank variant"
+   }
+  },
+  {
+   "id": "m-paint",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#efebe3",
+    "roughness": 0.92,
+    "name": "Warm white matte wall paint"
+   }
+  },
+  {
+   "id": "m-trim",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#f6f4ef",
+    "roughness": 0.45,
+    "name": "White satin trim"
+   }
+  },
+  {
+   "id": "m-tile",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#dcd8d0",
+    "roughness": 0.35,
+    "name": "Porcelain tile"
+   }
+  },
+  {
+   "id": "m-quartz",
+   "kind": "material",
+   "data": {
+    "type": "physical",
+    "color": "#f1efea",
+    "roughness": 0.15,
+    "name": "White quartz"
+   }
+  },
+  {
+   "id": "m-brass",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#b8913d",
+    "roughness": 0.35,
+    "metalness": 1,
+    "name": "Brushed brass"
+   }
+  },
+  {
+   "id": "m-steel-black",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#1d1d1f",
+    "roughness": 0.5,
+    "metalness": 0.6,
+    "name": "Matte black steel"
+   }
+  },
+  {
+   "id": "m-steel",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#c4c6c8",
+    "roughness": 0.3,
+    "metalness": 1,
+    "name": "Stainless steel"
+   }
+  },
+  {
+   "id": "m-linen",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#d8cfbf",
+    "roughness": 0.95,
+    "name": "Natural linen"
+   }
+  },
+  {
+   "id": "m-glass",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#cfe3ea",
+    "roughness": 0.15,
+    "metalness": 0,
+    "name": "Window glass",
+    "transparent": true,
+    "opacity": 0.22,
+    "depthWrite": false,
+    "side": "double",
+    "envMapIntensity": 0.3
+   }
+  },
+  {
+   "id": "m-shingle",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#3a3b3d",
+    "roughness": 0.95,
+    "name": "Charcoal shingle"
+   }
+  },
+  {
+   "id": "m-siding",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#f2f1ec",
+    "roughness": 0.8,
+    "name": "White siding"
+   }
+  },
+  {
+   "id": "m-brick",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#9c9a95",
+    "roughness": 0.9,
+    "name": "Concrete plinth"
+   }
+  },
+  {
+   "id": "m-grass",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#5d7d3a",
+    "roughness": 1,
+    "name": "Lawn"
+   }
+  },
+  {
+   "id": "m-cabinet",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#f3f1ec",
+    "roughness": 0.5,
+    "name": "White shaker cabinet"
+   }
+  },
+  {
+   "id": "m-ceramic",
+   "kind": "material",
+   "data": {
+    "type": "physical",
+    "color": "#fbfbfa",
+    "roughness": 0.08,
+    "name": "Glossy white ceramic"
+   }
+  },
+  {
+   "id": "m-wood-walnut",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#6b4a33",
+    "roughness": 0.6,
+    "name": "Walnut"
+   }
+  },
+  {
+   "id": "m-bulb",
+   "kind": "material",
+   "data": {
+    "type": "basic",
+    "color": "#fff1d6",
+    "name": "Glowing bulb (unlit emissive look)"
+   }
+  },
+  {
+   "id": "m-concrete",
+   "kind": "material",
+   "data": {
+    "type": "standard",
+    "color": "#b8b4ac",
+    "roughness": 0.95,
+    "name": "Broom-finish concrete"
+   }
+  }
+ ]
+}

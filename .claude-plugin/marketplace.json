@@ -1,0 +1,16 @@
+{
+  "name": "propertyprompt",
+  "owner": {
+    "name": "PropertyPrompt"
+  },
+  "metadata": {
+    "description": "PropertyPrompt skills for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "build-property",
+      "source": "./",
+      "description": "Build a PropertyPrompt property from a floor-plan image with staged multi-agent workflows."
+    }
+  ]
+}

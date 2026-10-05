@@ -1,0 +1,89 @@
+{
+  "_example": "Args for workflow/build.js and workflow/review.js (EXAMPLE values for a made-up property). new_property.py writes the real ones to <workDir>/build-args.json. Pass them as the Workflow tool's args object (a JSON value, not a string). Put the contents of <workDir>/areas.json under areas. workDir must be durable: never /tmp or a scratchpad. Use absolute paths (expand ~).",
+  "propertyId": "example-house",
+  "workDir": "~/property-build-work/example-house",
+  "kitDir": "<absolute path to skills/build-property/kit>",
+  "planImage": "~/property-build-work/example-house/source/plan.png",
+  "brief": "~/property-build-work/example-house/plan.md",
+  "startRevision": 2,
+  "today": "YYYY-MM-DD",
+  "market": "USA, USD, US retailers",
+  "style": "Simple gable-roofed cottage exterior (light siding with battens, dark window casings, dark shingle roof, small covered entrance porch); light and calm interior (pale wood floors, warm white walls, matte black and brass metal, natural textiles)",
+  "lightBudget": 15,
+  "maxCheckRounds": 3,
+  "shellCheckRounds": 3,
+  "lightingCheckRounds": 2,
+  "skip": {
+    "research": false,
+    "shell": false,
+    "lighting": false,
+    "areas": []
+  },
+  "areas": "<contents of areas.json: either the {\"areas\": [...]} object or the array>",
+  "reviewRounds": 2,
+  "fixCheckRounds": 2,
+  "models": {
+    "research": {
+      "model": "standard",
+      "effort": "medium"
+    },
+    "shell-model": {
+      "model": "standard",
+      "effort": "medium"
+    },
+    "shell-check": {
+      "model": "standard",
+      "effort": "medium"
+    },
+    "modeller": {
+      "model": "strong",
+      "effort": "high"
+    },
+    "modeller.finishes": {
+      "model": "standard",
+      "effort": "medium"
+    },
+    "modeller.exterior": {
+      "model": "standard",
+      "effort": "high"
+    },
+    "writer": {
+      "model": "standard",
+      "effort": "low"
+    },
+    "checker": {
+      "model": "standard",
+      "effort": "medium"
+    },
+    "verify": {
+      "model": "standard",
+      "effort": "low"
+    },
+    "lighting": {
+      "model": "standard",
+      "effort": "medium"
+    },
+    "access-points": {
+      "model": "standard",
+      "effort": "low"
+    },
+    "renderer": {
+      "model": "fast",
+      "effort": "low"
+    },
+    "critic": {
+      "model": "strong",
+      "effort": "high"
+    },
+    "fixer": {
+      "model": "strong",
+      "effort": "high"
+    },
+    "final": {
+      "model": "standard",
+      "effort": "low"
+    }
+  },
+  "knownNonIssues": [],
+  "cameras": null
+}

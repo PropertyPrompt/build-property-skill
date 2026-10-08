@@ -2,6 +2,7 @@
 """Test for products/_template.py, and the pattern to copy for a new product module's test.
 
     python3 $KIT/products/test_template.py
+    PROPERTY_BUILD_KIT=$KIT python3 <cache>/<room>/test_<product>.py   (a copy in the product cache)
 
 Builds the product twice (two instances, the total qty passed on both calls), merges the bundles,
 and checks: geometry and catalogue entries are shared rather than duplicated, ids carry the prefix,
@@ -13,11 +14,14 @@ import os
 import sys
 import tempfile
 
-KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+# A copy in the product cache is run with PROPERTY_BUILD_KIT=<kit folder>.
+KIT = os.environ.get('PROPERTY_BUILD_KIT') or os.path.dirname(HERE)
 sys.path.insert(0, KIT)
+sys.path.insert(0, HERE)
 
 from lib.payload import _clean, check_layers, merge, validate, write_payloads  # noqa: E402
-from products import _template as product  # noqa: E402  (a new test imports its own module)
+import _template as product  # noqa: E402  (a new test imports its own module: import <module> as product)
 
 
 def main():

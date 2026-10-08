@@ -41,6 +41,7 @@ const PID = A.propertyId
 const DIR = A.workDir
 const KIT = A.kitDir
 const PLAN = A.planImage
+const PRODUCTS = A.productsDir || DIR.replace(/\/[^/]+\/?$/, '/products')
 const AREAS = Array.isArray(A.areas) ? A.areas : (A.areas.areas || [])
 for (const a of AREAS) if (!a.key || !a.prefix || !a.scope) throw new Error(`area ${JSON.stringify(a).slice(0, 80)} needs key, prefix and scope`)
 const MARKET = A.market || 'USA, USD, US retailers'
@@ -72,7 +73,8 @@ Durable working directory: ${DIR} (never write build files to /tmp or a scratchp
 - ${DIR}/spec.json: measured spec sheet (source scale, walls, openings, rooms, drawn item footprints, heights, materials, id prefixes, style). Its coordinates are AUTHORITATIVE: if any figure in a prompt disagrees with spec.json (including an ERRATA_READ_FIRST block), spec.json wins.
 - Source plan image: ${PLAN}. Look at it.
 - Build brief: ${A.brief}
-- Kit: ${KIT} (lib/payload.py, lib/materials.json, products/, elements/, shell/, README.md).
+- Kit: ${KIT} (lib/payload.py, lib/materials.json, products/README.md, elements/, shell/, README.md).
+- Product cache: ${PRODUCTS} (product modules modelled in earlier builds, one per real product; may be empty).
 - Shared materials already published (use by id): every id in ${KIT}/lib/materials.json (m-oak, m-paint, m-trim, m-glass, ...). Add your own materials/geometry only with your area's prefix.
 Read the authoring guides you need with the get_authoring_guide tool (geometry, materials, behavior, editing, validation, limits, examples); reads are safe.
 Avoid get_property (its output is ~130 KB): use list_revisions for the current revision, get_scene_nodes (summary true for a placement list) for nodes, ${DIR}/rooms.json for rooms.
@@ -84,8 +86,8 @@ PAYLOADS (read carefully):
 - Generate payloads with a Python generator kept in ${DIR}/gen/, never by hand-typing JSON. In the generator:
     import sys; sys.path.insert(0, "${KIT}/lib"); sys.path.insert(0, "${KIT}")
     from payload import *   # box, rounded_box, cylinder, sphere, torus, extrude, tube, plane, circle, material, node, behavior, render, inst_t, inst_trs, merge, write_payloads, SOLID, SEAT, DECOR, HIDE
-  Build one bundle {"resources","products","nodes"} for the whole batch and call write_payloads(bundle, "${DIR}/payloads/<folder>", external=[ids that already exist on the server]). It strips quote and backslash characters from strings, rounds to 3 dp, clamps torus arcs, validates ids/parents/references, FAILS on coplanar layers closer than 2 mm (z-fighting), splits files (<=20 resources, <=50 products, <=100 nodes, <=60 KB) and orders them resources -> products -> nodes (parents first) -> update_settings. Fix what it reports; never bypass it. Return the paths it returns, in order.
-- REUSE FIRST: before modelling a product, look in ${KIT}/products/ (one module per product, see products/README.md) and ${KIT}/elements/ (roof, siding, porch, landscape, plants, floor finishes, interior trim). Each module has a docstring and build(prefix, inst_id, position, rotation_y=0, room_id=None, materials=None, qty=1, ...) -> bundle. If one matches your researched product (or is close enough with a materials override), call it instead of writing new geometry. Merge module bundles with merge().
+  Build one bundle {"resources","products","nodes"} for the whole batch and call write_payloads(bundle, "${DIR}/payloads/<folder>", external=[ids that already exist on the server]). It strips quote and backslash characters from strings, rounds to 3 dp, clamps torus arcs, validates every resource, node, product and settings key against the server's own schema (${DIR}/server-schema.json; errors name the field) and ids/parents/references, FAILS on coplanar layers closer than 2 mm (z-fighting), splits files (<=20 resources, <=50 products, <=100 nodes, <=60 KB) and orders them resources -> products -> nodes (parents first) -> update_settings. Fix what it reports; never bypass it. Return the paths it returns, in order.
+- REUSE FIRST: before modelling a product, look in the product cache ${PRODUCTS} (one module per real product, see ${KIT}/products/README.md) and ${KIT}/elements/ (roof, siding, porch, landscape, plants, floor finishes, interior trim). Each product module has a docstring and build(prefix, inst_id, position, rotation_y=0, room_id=None, materials=None, qty=1, ...) -> bundle; load one with: from products import load; mod = load("<room>.<module>", "${PRODUCTS}"). Reuse a cached module only when it is the product your research chose for this property, with its page and price re-checked; never choose a product because a module exists. Merge module bundles with merge().
 - File format (write_payloads produces it): ${DIR}/payloads/<folder>/<NN>-<tool>.json = compact JSON {"tool":"<tool name without prefix>","args":{...}}, args WITHOUT propertyId/expectedRevision. Allowed tools: put_scene_resources, upsert_product (args {"products":[...]}), put_scene_nodes, remove_scene_node, remove_scene_resource, remove_product, update_settings (args must include "settingsPatch" - rooms or authoring alone are refused - and never "settings").
 - Keep payloads small: writers retype every byte (payload size IS build time). Aim <= 150 KB per area. Use shaped geometry (roundedBox, extrude, cylinder, tube, torus) not buffers; share one geometry across copies with render.instances (inst_t / inst_trs); omit default fields (node() does); colour variation from materials, no image uploads.
 - Geometry: box dimensions are [x, y, z]; catalogue dimensions are [width, depth, height]. Box/roundedBox/cylinder/sphere are centred; extrude runs z=0..depth (rotate [-pi/2,0,0] to extrude upward; local y then maps to world -z); plane/circle face +Z. Instance matrices are column-major, translation at 12,13,14.
@@ -121,15 +123,33 @@ Ledger: ${DIR}/queue-ledger.jsonl records every successful write as one JSON lin
 2. Resume check: grep the ledger for batch "${label}". If some of its files are already recorded, this is a resumed batch: skip recorded put_scene_nodes / upsert_product / remove_* / update_settings files, but RESEND every put_scene_resources file of the batch anyway (idempotent; resources may have been swept while their nodes were missing). Check list_revisions so you start from the real current revision.
 3. For each file: cat it; it is {"tool":T,"args":A}. Call the PropertyPrompt tool T with A plus propertyId "${PID}" and expectedRevision = the current revision. Copy A EXACTLY (same ids, numbers, nesting); do not improve, reorder, drop or round anything; make sure your tool input is valid JSON. Use the revision the call returns as the new current revision (never guess an increment). Then append the ledger line with a shell command (printf '%s\\n' '{...}' >> ${DIR}/queue-ledger.jsonl).
 4. If your own tool input fails to parse, re-read the file and retry (max 2). On a revision conflict: list_revisions, and if the newer revision could be your own earlier call (e.g. after a timeout), check with get_scene_nodes whether that file is already applied before resending; retry at most twice. Never call get_property.
-5. On any other rejection (schema, intersection, blocked navigation, missing reference): do NOT edit the payload and do NOT retry. Record the verbatim error (with any plan excerpt and coordinates, up to ~3000 chars) under failed, list every remaining file of this batch under notWritten, and stop.
+5. If the host refuses a remove_* call (a permission denial, not a server error), do not retry it: record that file under failed with an error starting "NEEDS_MAIN_SESSION", list every remaining file of this batch under notWritten, and stop. write_payloads puts removals first, so nothing else of the batch has landed.
+6. On any other rejection (schema, intersection, blocked navigation, missing reference): do NOT edit the payload and do NOT retry. Record the verbatim error (with any plan excerpt and coordinates, up to ~3000 chars) under failed, list every remaining file of this batch under notWritten, and stop.
 Return finalRevision (latest revision after your last success, or the starting one), written, failed, notWritten.`
 }
 
-async function writeFiles(files, label, phaseName) {
+// Batches stopped by a host-refused removal, at most one per owner, for the main session to write after
+// the workflow. The owner's later agents fold a pending batch into any new fixes, so the owner's next
+// batch supersedes it whatever happens: refused, it replaces it; otherwise it retires it, and whatever
+// of the new batch did not land goes through the usual failed/notWritten path. None is replayed.
+const deferred = new Map()
+function pendingText(owners) {
+  const p = owners.map(o => deferred.get(o)).filter(Boolean)
+  return p.length ? `PENDING for the main session (stopped at a removal the host refused; NOT landed): ${JSON.stringify(p)}. Do not regenerate it on its own. If you produce any fix files, regenerate its changes into them as well (its removals first), because your new batch replaces it.` : ''
+}
+function settleDeferred(owners, r, label) {
+  const refused = r ? r.failed.filter(f => /^NEEDS_MAIN_SESSION/.test(f.error)) : []
+  for (const o of owners) deferred.delete(o)
+  if (refused.length) deferred.set(owners[0], { owner: owners[0], batch: label, files: [...refused.map(f => f.file), ...r.notWritten] })
+}
+
+// owners: the owner this batch belongs to first, then any other owners whose pending batch it folds in.
+async function writeFiles(files, label, phaseName, owners = [label]) {
   if (!files || !files.length) return { finalRevision: rev, written: [], failed: [], notWritten: [] }
   return queuedWrite(async () => {
     const r = await agent(writerPrompt(files, rev, label), M('writer', { label: `write:${label}`, phase: phaseName, schema: WRITE_SCHEMA, effort: 'low' }))
     if (r && typeof r.finalRevision === 'number' && r.finalRevision > rev) rev = r.finalRevision
+    settleDeferred(owners, r, label)
     log(`write ${label}: ${r ? r.written.length : 0} ok, ${r ? r.failed.length : '?'} failed, rev now ${rev}`)
     return r || { finalRevision: rev, written: [], failed: [{ file: files[0], error: 'writer agent died' }], notWritten: files }
   })
@@ -142,8 +162,8 @@ const MODEL_SCHEMA = {
     files: { type: 'array', items: { type: 'string' }, description: 'absolute payload paths in write order (from write_payloads)' },
     summary: { type: 'string' },
     products: { type: 'array', items: { type: 'string' } },
-    reused: { type: 'array', items: { type: 'string' }, description: 'kit modules reused (products/..., elements/...)' },
-    newModules: { type: 'array', items: { type: 'string' }, description: 'products modelled from scratch that should be extracted into the kit' },
+    reused: { type: 'array', items: { type: 'string' }, description: 'modules reused (product cache names, elements/...)' },
+    newModules: { type: 'array', items: { type: 'string' }, description: 'products modelled from scratch that should be added to the product cache' },
     assumptions: { type: 'array', items: { type: 'string' } },
   },
   required: ['files', 'summary'],
@@ -171,6 +191,7 @@ const RESEARCH_SCHEMA = {
 
 function failedText(w, key, round) {
   if (!w || !w.failed || !w.failed.length) return 'The last queued write succeeded.'
+  if (w.failed.every(f => /^NEEDS_MAIN_SESSION/.test(f.error))) return 'The last queued write stopped at a removal the host refused; it is listed as PENDING below.'
   return `The last queued write FAILED:\n${JSON.stringify(w.failed, null, 1)}\nNot written: ${JSON.stringify(w.notWritten)}
 Correct those files (regenerate with the generator into a NEW folder ${DIR}/payloads/${key}-fix-r${round}/) and resubmit them together with every not-written file still needed AND every put_scene_resources file whose resources those nodes use (resources whose nodes never landed may have been swept).`
 }
@@ -185,15 +206,16 @@ async function checkLoop(key, prefix, scopeText, writeResult, phaseName, maxRoun
     result = await agent(`${COMMON}
 You are the CHECKER/FIXER for "${key}" (id prefix "${prefix}"), round ${round}/${maxRounds}. Scope: ${scopeText}
 ${failedText(last, key, round)}
+${pendingText([key])}
 1. validate_property (plan true, maxIssues 200). Save the full output to ${DIR}/validation/${key}-r${round}.json.
 2. Read the character plan and reachability report: every room accessPoint must be reachable from the entrance; no sealed floor ('!') caused by your nodes; no blocked doorways. Look into EVERY solid intersection and mesh-collision candidate involving "${prefix}" ids and decide: real problem (interpenetration, through a wall, floating, blocking a route) or harmless surface contact. An accessPoint that your furniture now covers is NOT yours to fix: report it as "ACCESSPOINT:<roomId>" (the lighting phase moves access points after furnishing).
 3. Use get_scene_nodes for details; your generator is in ${DIR}/gen/ and payloads in ${DIR}/payloads/.
-4. For real problems in YOUR area, edit the generator and emit only the changed nodes/resources with write_payloads into ${DIR}/payloads/${key}-fix-r${round}/ and list them in fixFiles (put_scene_nodes replaces whole nodes: complete transforms; remove via bundle "removeNodes"). Problems owned by another area: list in issues as "OTHER(<area>): ...". Never disable collision to hide a problem.
+4. For real problems in YOUR area, edit the generator and emit only the changed nodes/resources with write_payloads into ${DIR}/payloads/${key}-fix-r${round}/ and list them in fixFiles (put_scene_nodes replaces whole nodes: complete transforms. Change a node by replacing it under its existing id, reusing the old child ids for the new parts; use bundle "removeNodes" only for parts that must disappear, because the host may refuse removals). Problems owned by another area: list in issues as "OTHER(<area>): ...". Never disable collision to hide a problem.
 ${PAYLOAD_RULES}
 Return done=true only when nothing real remains for your area (fixFiles empty).`, M('checker', { label: `check:${key}:r${round}`, phase: phaseName, schema: CHECK_SCHEMA }, key))
     if (!result) break
     if (result.done || !result.fixFiles.length) { wroteAfterLastCheck = false; break }
-    last = await writeFiles(result.fixFiles, `${key}-fix-r${round}`, phaseName)
+    last = await writeFiles(result.fixFiles, `${key}-fix-r${round}`, phaseName, [key])
     wroteAfterLastCheck = true
   }
   if (wroteAfterLastCheck) {
@@ -213,11 +235,11 @@ for (const a of AREAS) {
   if (SKIP.research || SKIP_AREAS.has(a.key) || !a.research) { researchPromises[a.key] = Promise.resolve(null); continue }
   researchPromises[a.key] = agent(`${COMMON}
 You are the product researcher for area "${a.key}". Market: ${MARKET}. Style: ${STYLE}. Today is ${A.today}.
-First check ${KIT}/products/ for modules whose PRODUCT dict already covers a suitable product (reuse saves modelling): re-verify the page and price instead of searching from scratch.
+Research for this property's brief first. If a product you choose already has a module in the product cache ${PRODUCTS} (compare its PRODUCT dict), note it as kitModule and re-verify its page and price; a cached module is never a reason to pick a product.
 Find real, currently sold products for: ${a.research}.
 Area scope (for sizing; coordinates come from spec.json): ${a.scope}
 For each product open the manufacturer's or retailer's PRODUCT page (WebSearch/WebFetch) and verify: exact name, retailer, URL (the product page), price, overall dimensions in metres (w, d, h), finish/colour, and the visible construction a 3D modeller needs (legs, arms, cushions, handles, panel style, materials, hex colour guesses). If a page cannot be verified, pick another product. Choose sizes that fit spec.json's rooms and drawn footprints.
-Write JSON to ${DIR}/research/${a.key}.json: {"area":"${a.key}","researchDate":"${A.today}","products":[{"key","item","name","retailer","url","price","qty","dimensions_m":{"w","d","h"},"finish","construction","colours":{},"verified":true,"kitModule":"products/... if reusable","notes"}],"gaps":[]}. Write no quote characters inside strings (write 76x80 in, not 76x80").
+Write JSON to ${DIR}/research/${a.key}.json: {"area":"${a.key}","researchDate":"${A.today}","products":[{"key","item","name","retailer","url","price","qty","dimensions_m":{"w","d","h"},"finish","construction","colours":{},"verified":true,"kitModule":"<cache module name> if one matches","notes"}],"gaps":[]}. Write no quote characters inside strings (write 76x80 in, not 76x80").
 Do not write anything to PropertyPrompt. Return the file path, product count and gaps.`, M('research', { label: `research:${a.key}`, phase: 'Research', schema: RESEARCH_SCHEMA }, a.key))
 }
 
@@ -233,6 +255,7 @@ SHELL RULES:
 - Angled walls (spec.angledWalls; shell.py builds only walls along x or z): hand-model each as yaw-rotated wall segments with the same roles and behavior as above, gaps at its openings, headers and sills rotated with it, and meet the neighbouring walls without overlapping solids. The rooms they bound carry a spec "polygon"; the floor finishes clip to it.`
 
 let shellCheck = null
+const SHELL_OWNERS = ['shell', ...SHELL_PARTS.map(s => s.key)]
 if (!SKIP.shell) {
   const shellModels = await parallel(SHELL_PARTS.map(s => () => agent(`${COMMON}
 You are the ${s.key} modeller (id prefix "${s.prefix}"). Build ${s.scope}
@@ -256,6 +279,7 @@ Generator: ${DIR}/gen/${s.key.replace(/-/g, '_')}.py. Payloads: ${DIR}/payloads/
   for (let round = 1; round <= SHELL_ROUNDS; round++) {
     shellCheck = await queuedRender(() => agent(`${COMMON}
 You are the SHELL CHECKER, round ${round}/${SHELL_ROUNDS}. Current revision ~ ${rev}.${lastFixWrite ? `\nLast fix write: ${JSON.stringify(lastFixWrite)}` : ''}
+${pendingText(SHELL_OWNERS)}
 1. validate_property (plan true, maxIssues 200), save to ${DIR}/validation/shell-r${round}.json. Every room accessPoint reachable; no sealed floor; doorways passable; no wall-wall intersections.
 2. render_property: ONE call with view "plan" (cutaway true, 1600x1200), then ONE call with up to 4 cameras at cutaway false: two aerial views from opposite corners of the footprint (spec.json footprint; ~12 m up, ~6 m outside the corner, targeting the centre) and two eye-level interior views (1.6 m) from the entrance and from the far end of the main room. Save each returned image as ${DIR}/renders/shell-r${round}-<n>.jpg (where the tool result names a saved file, as "[Image: source: ...]" in Claude Code, cp that exact path).
 3. Compare the plan render with the source plan wall by wall: footprint, each wall position/thickness, each opening position/width, door swing sides, bifolds, room extents. In 3D: holes, floating headers/sills, wrong heights, missing glass, flipped faces.
@@ -266,7 +290,7 @@ Return matches=true only if the shell matches the source plan with no real probl
     if (!shellCheck) break
     log(`shell check r${round}: matches=${shellCheck.matches}, ${shellCheck.issues.length} issues`)
     if (shellCheck.matches || !shellCheck.fixFiles.length) { wroteFix = false; break }
-    lastFixWrite = await writeFiles(shellCheck.fixFiles, `shell-fix-r${round}`, 'Shell')
+    lastFixWrite = await writeFiles(shellCheck.fixFiles, `shell-fix-r${round}`, 'Shell', SHELL_OWNERS)
     wroteFix = true
   }
   if (wroteFix) {
@@ -316,7 +340,7 @@ if (!SKIP.lighting) {
 You are the lighting & cameras agent (id prefix "lt-"). All areas are built; current revision ~ ${rev}.
 Prepare payloads (one bundle, write_payloads into ${DIR}/payloads/lighting/):
 1. Scene light nodes (roots, container "scene"): a directional sun (warm white, castShadow true, shadow {mapSize 2048, bias -0.0005, normalBias 0.02, near 0.5, far 60, extent ~ max footprint + 2}) high from the south-west targeting an empty target node at the footprint centre; a hemisphere sky light (sky #dfe9f5, ground #8a7d68).
-2. settingsPatch (bundle key "settingsPatch"): defaultLighting false; appearance {simpleBackground, realisticBackground, simpleExposure ~1.2, realisticExposure ~0.9}; presets: dollhouse, plan and walk (walk from the entrance looking into the house) plus one per room at eye height 1.55-1.65 m from a doorway looking across the room, and an exterior kerb view. NOTE: extra presets are hidden when the property has an explicit floors list; if spec.json/rooms show floors, still author them but say so in modelNotes. labels per zone; description, subtitle, areaUnit, areaStats, researchDate "${A.today}", shoppingNotes per area, modelNotes (keep existing notes and append build notes/approximations). Read the current settings via get_property ONCE only if you must, otherwise from ${DIR}/rooms.json and spec.json.
+2. settingsPatch (bundle key "settingsPatch"): defaultLighting false; appearance {simpleBackground, realisticBackground} (leave simpleExposure and realisticExposure at the server's defaults; the review changes them only when renders show the exposure is wrong); presets: dollhouse, plan and walk (walk from the entrance looking into the house) plus one per room at eye height 1.55-1.65 m from a doorway looking across the room, and an exterior kerb view. NOTE: extra presets are hidden when the property has an explicit floors list; if spec.json/rooms show floors, still author them but say so in modelNotes. labels per zone; description, subtitle, areaUnit, areaStats, researchDate "${A.today}", shoppingNotes per area, modelNotes (keep existing notes and append build notes/approximations). Read the current settings via get_property ONCE only if you must, otherwise from ${DIR}/rooms.json and spec.json.
 Area summaries: ${JSON.stringify(summaries)}
 ${PAYLOAD_RULES}
 Return the files (nodes first, then the update_settings file).`, M('lighting', { label: 'model:lighting', phase: 'Lighting', schema: MODEL_SCHEMA }))
@@ -344,5 +368,6 @@ return {
   shell: shellCheck,
   areas: areaResults.map(r => r && ({ key: r.key, summary: r.model && r.model.summary, products: r.model && r.model.products, reused: r.model && r.model.reused, newModules: r.model && r.model.newModules, assumptions: r.model && r.model.assumptions, done: r.check && r.check.done, open: r.check && r.check.issues, unwritten: r.check && r.check.unwritten })),
   lighting: { summary: lightModel && lightModel.summary, open: lightCheck && lightCheck.issues, accessPoints: access },
-  next: `Run workflow/review.js with startRevision ${rev}. Then extract newModules into ${KIT}/products/.`,
+  mainSessionWrites: [...deferred.values()],
+  next: `${deferred.size ? 'Write mainSessionWrites from the main session first, then run' : 'Run'} workflow/review.js with startRevision from list_revisions. Then extract newModules into the product cache.`,
 }

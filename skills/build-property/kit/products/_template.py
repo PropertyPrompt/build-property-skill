@@ -1,7 +1,7 @@
 """Template product module: a made-up side table, to copy when you add a real product.
 
-Copy this file to products/<room>/<product_name>.py (or products/<product_name>.py), replace the
-PRODUCT values with the researched ones, and rewrite build() to model the real silhouette. Keep the
+Copy this file into your product cache as <cache>/<room>/<product_name>.py (products/README.md), replace
+the PRODUCT values with the researched ones, and rewrite build() to model the real silhouette. Keep the
 signature, the id scheme and the catalogue behaviour; products/test_template.py shows how to test it.
 
 Everything below about the product itself is a PLACEHOLDER: there is no such product.
@@ -17,13 +17,8 @@ Modelling conventions (see products/README.md):
 """
 import hashlib
 import json
-import os
-import sys
 
-KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if KIT not in sys.path:
-    sys.path.insert(0, KIT)
-
+# The kit is on sys.path: discover() and generators import it first, and the test adds it.
 from lib.payload import SOLID, bundle, cylinder, inst_t, material, node, rounded_box  # noqa: E402
 
 PRODUCT = {

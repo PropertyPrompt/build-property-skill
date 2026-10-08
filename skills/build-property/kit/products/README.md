@@ -1,17 +1,23 @@
 # Products
 
-One Python module per real product, so a product researched and modelled once can be placed in any
-property. The folder starts empty apart from the scaffolding:
+One Python module per real product, so a product researched and modelled once can be placed again
+when a later build chooses the same product. The kit holds only the scaffolding:
 
 | File | What |
 |---|---|
 | `_template.py` | a fully commented, runnable module for a made-up side table: copy it |
 | `test_template.py` | its test, and the pattern for a new module's test |
-| `__init__.py` | `discover()`: every module here that defines `PRODUCT` and `build()` |
+| `__init__.py` | `discover()` and `load()`: the modules in your product cache that define `PRODUCT` and `build()` |
 
-Put modules in `products/<room>/<product_name>.py` (add an empty `__init__.py` to each room folder)
-or directly in `products/`. Module and key names describe the product (`oak_dining_table`), not the
-property it was first used in.
+Your modules live in a **product cache** outside the kit: `$PROPERTY_BUILD_PRODUCTS`, else
+`<work root>/products` (normally `~/property-build-work/products`; `productsDir` in `build-args.json`).
+The kit stays a generic toolkit rather than a furniture catalogue, and a cached module is a shortcut
+for modelling, never a reason to choose a product: each build researches its own products for its
+brief, and reuses a module only for the product research picked.
+
+Put modules in `<cache>/<room>/<product_name>.py` or directly in the cache. Module and key names
+describe the product (`oak_dining_table`), not the property it was first used in. Load one by its
+dotted path: `from products import load; mod = load('living.oak_dining_table')`.
 
 ## 1. Research the product
 
@@ -71,9 +77,10 @@ def build(prefix, inst_id, position, rotation_y=0.0, room_id=None, materials=Non
 
 ## 4. Test it
 
-Copy `test_template.py` to `test_<product>.py` next to the module and change the import. It builds
+Copy `test_template.py` to `test_<product>.py` next to the module and change the import to
+`import <product_name> as product`. It builds
 two instances, merges them with `lib.payload.merge`, and asserts that geometry and the catalogue
 entry are shared, every id is prefixed, `validate` reports no errors, `check_layers` finds no
 z-fighting, and `write_payloads` writes queue files to a temporary directory. Add checks for the
-product's own key dimensions (top height, seat height, overall footprint). Run it, and run
-`python3 $KIT/tests/run_selftest.py`, which also runs every `products/**/test_*.py`.
+product's own key dimensions (top height, seat height, overall footprint). Run it with
+`PROPERTY_BUILD_KIT=$KIT python3 <cache>/<room>/test_<product_name>.py`.

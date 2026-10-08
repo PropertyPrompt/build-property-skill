@@ -29,7 +29,7 @@ Writers retype every payload byte into a tool call, so payload size sets the bui
 - one geometry with `render.instances` for repeated parts (chair legs, planks, battens)
 - the shared materials library in `$KIT/lib/materials.json`
 - colour variation from materials, not uploaded textures
-- reuse of `$KIT/products/` and `elements/` modules where they fit
+- reuse of `elements/` modules, and of product cache modules for products research picked
 
 ## Scale and layout
 
@@ -65,7 +65,7 @@ Product research for every area starts at once and runs alongside the shell.
 
 ### Phase 2: areas in parallel
 
-Each area agent reuses kit modules where a matching product exists, models the rest from verified product pages (new ones are added to `products/` afterwards), adds catalogue entries and places its own lights. Its payloads go through one queue slot, then `validate_property`, then a check-and-fix loop (at most {{MAX_CHECK_ROUNDS, default 3}} rounds; fixes are always written and verified).
+Each area agent researches its products for this brief, reuses a product cache module only for a product research picked, models the rest from verified product pages (new ones are added to the product cache afterwards), adds catalogue entries and places its own lights. Its payloads go through one queue slot, then `validate_property`, then a check-and-fix loop (at most {{MAX_CHECK_ROUNDS, default 3}} rounds; fixes are always written and verified).
 
 | Area | Prefix | Lights | Scope |
 |---|---|---|---|

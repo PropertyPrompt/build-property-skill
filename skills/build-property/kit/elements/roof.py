@@ -122,9 +122,10 @@ def _frame_faces(g):
 
 
 def build(spec, prefix='ex-', geom=None, materials=None, downpipes=None, shingle_seed=1,
-          tone_split=(0.22, 0.40), exposure=0.143, grade=None, product=None, shingle_qty=None,
-          shingle_fit=None, siding_product_key=None, **geom_kw):
+          tone_split=(0.22, 0.40), exposure=0.143, tab=0.333, keyway=(0.01, 0.11), grade=None, product=None,
+          shingle_qty=None, shingle_fit=None, siding_product_key=None, **geom_kw):
     """Return the roof bundle. Give `geom` (RoofGeom) or the RoofGeom keywords (pitch is required).
+    `tab`: shingle tab width; `keyway`: (width, height) of the joints between tabs, in metres.
     `downpipes`: list of (eave 'lo'|'hi', u along the ridge from the frame origin); default 0.30 m in
     from both ends of both eaves. `product`: researched roofing product for the catalogue."""
     g = geom or RoofGeom(spec, **geom_kw)
@@ -194,12 +195,37 @@ def build(spec, prefix='ex-', geom=None, materials=None, downpipes=None, shingle
     b.mesh('rake-w', 'roof', [XL - 0.025, 0, 0], 'Rake board west', g_rake, [M_TRIM, M_TRIM], rot=[0, PI / 2, 0])
     b.mesh('rake-e', 'roof', [XR, 0, 0], 'Rake board east', g_rake, [M_TRIM, M_TRIM], rot=[0, PI / 2, 0])
 
-    # shingle courses: one box per course per slope, tone picked at random (three instanced meshes)
-    EXPO, E_RAISE, SH_T = exposure, 0.012, 0.010
-    SH_W = XR - XL + 0.02
-    g_course = b.box('g-course', [SH_W, SH_T, 0.144])
+    # shingle courses, tone picked at random per course: a notched top strip (tabs with keyway joints,
+    # offset half a tab on alternate courses) over a thin dark base strip that shows in the joints.
+    # A course is a box frame: x along the ridge, y the slope normal, z along the slope.
+    EXPO, E_RAISE, SH_T, BASE_T = exposure, 0.012, 0.010, 0.004
+    SH_W, SH_L = XR - XL + 0.02, 0.144
+    TAB = max(tab, SH_W / 48)       # an extrude takes at most 200 points: 4 per joint
+    g_base = b.box('g-course-base', [SH_W, BASE_T, SH_L])
+
+    def tabbed(name, offset):
+        y0, y1 = -SH_L / 2, -SH_L / 2 + keyway[1]
+        pts = [(-SH_W / 2, y0)]
+        x = -SH_W / 2 + offset
+        while x + keyway[0] / 2 < SH_W / 2 - 0.01:
+            if x - keyway[0] / 2 > -SH_W / 2 + 0.01:
+                pts += [(x - keyway[0] / 2, y0), (x - keyway[0] / 2, y1), (x + keyway[0] / 2, y1), (x + keyway[0] / 2, y0)]
+            x += TAB
+        return b.extrude(name, pts + [(SH_W / 2, y0), (SH_W / 2, SH_L / 2), (-SH_W / 2, SH_L / 2)], SH_T - BASE_T)
+
+    g_tabs = (tabbed('g-course-a', TAB), tabbed('g-course-b', TAB / 2))
+
+    def tab_matrix(th, x, cy, cz, eave_low):
+        # Extrude XY -> course (x, z), extrude depth -> course y, eave edge at the strip's -y profile edge;
+        # turned half a turn about the normal when the course's eave lies at +z.
+        c, s, top = math.cos(th), math.sin(th), SH_T / 2
+        cols = ([1, 0, 0], [0, -s, c], [0, -c, -s]) if eave_low else ([-1, 0, 0], [0, s, -c], [0, -c, -s])
+        return [r4(v) for v in cols[0]] + [0] + [r4(v) for v in cols[1]] + [0] + [r4(v) for v in cols[2]] + [0] + \
+            [r4(x), r4(cy + c * top), r4(cz + s * top), 1]
+
     rnd = random.Random(shingle_seed)
-    inst = {M_SHINGLE: [], M_SH_HI: [], M_SH_LO: []}
+    inst = {(m, v): [] for m in (M_SHINGLE, M_SH_HI, M_SH_LO) for v in (0, 1)}
+    base = []
     n_courses = math.ceil((g.L_SLOPE - 0.06) / EXPO)        # last course tucks under the ridge cap
     for side in ('n', 's'):
         for i in range(n_courses):
@@ -224,11 +250,19 @@ def build(spec, prefix='ex-', geom=None, materials=None, downpipes=None, shingle
             cy = (B[1] + Tt[1]) / 2 + nrm[1] * SH_T / 2
             r = rnd.random()
             m = M_SH_HI if r < tone_split[0] else (M_SH_LO if r < tone_split[1] else M_SHINGLE)
-            inst[m].append(MRX(th, (XL + XR) / 2, cy, cz))
-    for k, (m, lst) in enumerate(inst.items()):
-        if lst:
-            b.mesh(f'shingles-{k + 1}', 'roof', [0, 0, 0], f'Shingle courses tone {k + 1}', g_course, m,
-                   instances=lst, **SK)
+            c, s, drop = math.cos(th), math.sin(th), (SH_T - BASE_T) / 2
+            base.append(MRX(th, (XL + XR) / 2, cy - c * drop, cz - s * drop))
+            inst[(m, i % 2)].append(tab_matrix(th, (XL + XR) / 2, cy, cz, side == 'n'))
+    def meshes(nid, name, geom, mats, lst, **kw):
+        # the server takes at most 512 instances per node
+        parts = [lst[j:j + 512] for j in range(0, len(lst), 512)]
+        for j, part in enumerate(parts):
+            b.mesh(nid if len(parts) == 1 else f'{nid}-{j + 1}', 'roof', [0, 0, 0], name, geom, mats,
+                   instances=part, **kw)
+
+    meshes('shingles-base', 'Shingle courses, base strip', g_base, M_SH_LO, base)
+    for k, ((m, v), lst) in enumerate(inst.items()):
+        meshes(f'shingles-{k + 1}', f'Shingle courses tone {k // 2 + 1}', g_tabs[v], [m, m], lst, **SK)
 
     # ridge cap
     h0, h1, w = 0.026, 0.038, 0.16

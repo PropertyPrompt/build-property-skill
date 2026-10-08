@@ -11,11 +11,12 @@ Steps (PASS/FAIL each; exit status 1 if any fails):
   shell      shell/shell.py build_shell on the example spec
   elements   every elements/ module on the example spec, with placeholder products
   payload    merge shell + elements; lib.payload validate, check_layers and write_payloads
+  schema     the same bundle against the server schema fixture; field-level rejections
   angled     a living room with a cut corner (angledWalls, room polygon): spec check, plank, tile and
              ceiling layers and areas; slab interior doors with steel hardware
   polygons   L-shaped room wall checks and invalid angled openings
   floor-edges concave, shallow diagonal and narrow diagonal floors: coverage, piece sizes, payloads
-  products   every products/**/test_*.py (the template's test included)
+  products   every test_*.py in the kit's products/ (the template's test)
   payload.py lib/payload.py --selftest
   workflows  workflow/*.js parse (module body wrapped in an async Function, `export` stripped)
 
@@ -35,6 +36,8 @@ import traceback
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, KIT)
 EXAMPLE = os.path.join(KIT, 'measure', 'spec.example.json')
+# get_schema's schemas from the PropertyPrompt server; refresh it when the server's schema changes
+SCHEMA_FIXTURE = os.path.join(KIT, 'tests', 'server-schema.fixture.json')
 PY = sys.executable
 
 results = []
@@ -69,7 +72,7 @@ def sh(cmd, **kw):
 def placeholder(item, **extra):
     """An obviously fake product record, standing in for a researched one."""
     p = {'item': item, 'name': 'Placeholder ' + item.lower(), 'retailer': '<retailer>', 'url': '<product page url>',
-         'price': None, 'size': '<size>', 'dimensions_m': [1.0, 0.1, 0.01], 'status': 'Unverified'}
+         'price': 0, 'size': '<size>', 'dimensions_m': [1.0, 0.1, 0.01], 'status': 'Unverified'}
     p.update(extra)
     return p
 
@@ -205,6 +208,49 @@ def main():
         kb = sum(os.path.getsize(p) for p in paths) / 1024
         return '%d resources, %d products, %d nodes -> %d files, %.0f KB' % (
             len(b['resources']), len(b['products']), len(b['nodes']), len(paths), kb)
+
+    @step('schema')
+    def s_schema():
+        from lib.payload import SCHEMA_FILE, _clean, box, bundle, material, merge, node, validate, write_payloads
+        schemas = json.load(open(SCHEMA_FIXTURE))['schemas']
+        if 'shell' not in built or 'elements' not in built:
+            raise RuntimeError('shell or elements step failed')
+        b = _clean(merge(built['shell'], *built['elements'].values()))
+        errors, _ = validate(b, schemas=schemas)
+        assert not errors, '\n'.join(errors[:30])
+        product = {'modelKey': 'x-chair', 'room': 'Living', 'item': 'Chair', 'name': 'Chair', 'retailer': 'Shop',
+                   'price': 120, 'qty': 1, 'url': 'https://example.com/p', 'dimensions': [0.5, 0.5, 0.8]}
+        bad = bundle([box('x-g', (1, 1, 1)), {'id': 'x-g2', 'kind': 'geometry', 'data': {'type': 'cone', 'radius': 1}},
+                      {'id': 'x-g3', 'kind': 'geometry', 'data': {'type': 'box', 'dimensions': [1, 1, 1], 'name': 'n'}},
+                      material('x-m', '#ffffff')],
+                     [dict(product, price='$120'), dict(product, modelKey='x-flat', dimensions=[0, 0, 0])],
+                     [node('x-n', None, geom='x-g', mat='x-m', role='beam')],
+                     settingsPatch={'appearance': {'realisticExposure': 9}, 'colour': 'red'})
+        errors, _ = validate(_clean(bad), schemas=schemas)
+        expect = ['product x-chair: /price: expected number', 'product x-flat: /dimensions/0: 0 must be > 0',
+                  'x-g2: /: no alternative matches', 'x-g3: /: unexpected key "name"', "x-n: /role: 'beam' not one of",
+                  'settingsPatch: /realisticExposure: 9 must be <= 5', "settingsPatch: unknown setting 'colour'"]
+        missing = [x for x in expect if not any(e.startswith(x) for e in errors)]
+        assert not missing, 'not reported: %s\ngot:\n%s' % (missing, '\n'.join(errors))
+        # a 70 m deep roof has more shingle courses than one node may instance (512)
+        from elements import roof
+        long_spec = copy.deepcopy(spec)
+        long_spec['outerWalls'] = [{'id': 'n', 'axis': 'x', 'line_z_outer': 0, 'from': 0, 'to': 10},
+                                   {'id': 's', 'axis': 'x', 'line_z_outer': 70, 'from': 0, 'to': 10},
+                                   {'id': 'w', 'axis': 'z', 'line_x_outer': 0, 'from': 0, 'to': 70},
+                                   {'id': 'e', 'axis': 'z', 'line_x_outer': 10, 'from': 0, 'to': 70}]
+        errors, _ = validate(_clean(roof.build(long_spec, geom=roof.geometry(long_spec, pitch=0.5))), schemas=schemas)
+        assert not errors, '\n'.join(errors[:10])
+        # write_payloads finds the schema saved in the work dir and refuses the bad bundle
+        work = os.path.join(tmp, 'schema-work')
+        os.makedirs(os.path.join(work, 'payloads'))
+        shutil.copy(SCHEMA_FIXTURE, os.path.join(work, SCHEMA_FILE))
+        try:
+            write_payloads(bad, os.path.join(work, 'payloads', 'area'), quiet=True)
+            raise AssertionError('write_payloads accepted a bundle the server schema rejects')
+        except ValueError as e:
+            assert 'expected number' in str(e), e
+        return 'kit output passes the server schema; %d rejections reported by field' % len(expect)
 
     @step('angled')
     def s_angled():
@@ -353,7 +399,7 @@ def main():
         sh(['node', '-e', js] + files)
         return ', '.join(os.path.basename(f) for f in files) + ' parse'
 
-    for fn in (s_plan, s_measure, s_compare, s_spec, s_shell, s_elements, s_payload, s_angled,
+    for fn in (s_plan, s_measure, s_compare, s_spec, s_shell, s_elements, s_payload, s_schema, s_angled,
                s_polygons, s_floor_edges, s_products,
                s_payload_selftest, s_workflows):
         fn()

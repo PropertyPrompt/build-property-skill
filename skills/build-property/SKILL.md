@@ -82,20 +82,23 @@ It measures the plan and writes: `spec.draft.json`, `spec-overlay.png`, `plan.md
 - Fill the remaining `{{...}}` placeholders in `<workDir>/plan.md`.
 - Tailor `areas.json` to the rooms that actually exist:
   - drop areas with no rooms, split large ones;
-  - keep the `products/` and `elements/` reuse notes;
+  - note in each area's scope which `elements/` modules fit;
   - set the light budgets so they total about 15.
-- Check `$KIT/products/` for modules you or others have added (`python3 -c "import sys; sys.path.insert(0,'$KIT'); from products import discover; [print(k, m.PRODUCT['item'], m.PRODUCT['name']) for k, m in discover().items()]"`) and note in each area which ones fit. Reused products still need their price and product page re-checked. Everything else is researched and modelled new, following `products/README.md` and `products/_template.py`.
+- Check the product cache (`productsDir` in `build-args.json`, normally `$WORK/products`) for modules from earlier builds: `python3 -c "import sys; sys.path.insert(0,'$KIT'); from products import discover; [print(k, m.PRODUCT['item'], m.PRODUCT['name']) for k, m in discover('<productsDir>').items()]"`. The cache only saves modelling time: research still picks each product for this brief, a cached module is used only when research chose that same product, and its price and page are re-checked. Everything else is researched and modelled new, following `products/README.md` and `products/_template.py`.
+- Fill `knownNonIssues` in `build-args.json` with the user's Stage 1 decisions that a critic could mistake for faults, one line each: declined extras ("No landscaping or porch: the owner declined extras"), the chosen style and product lines where they limit options, and the walkable-path choice. The review passes them to every critic and fixer.
 
 ## Stage 5: create the property
 
 Do this in the main session, before any workflow:
-1. Read `get_schema` and the authoring guides: geometry, materials, behavior, editing, validation, limits.
+1. Read `get_schema` and the authoring guides: geometry, materials, behavior, editing, validation, limits. Save the `schemas` object from `get_schema` as `<workDir>/server-schema.json`, exactly as returned (where the host saved the tool result to a file, copy that file). `write_payloads` validates every payload against it, so schema errors show up locally, naming the field, before anything reaches the server.
 2. Call `create_property` from `create_property.draft.json` plus the spec rooms. Give rooms `accessPoint`s on clear floor. Pass **no `floors` list** unless the property has several storeys or the user chose a walkable path.
 3. Call `put_scene_resources` with the `resources` array from `$KIT/lib/materials.json`.
 4. Set `startRevision` in `build-args.json` to the revision returned.
 5. Ask the user to open the viewer URL in a signed-in browser tab and keep it in front. Then test-render the plan view. If the render returns `ok:false`, follow its `next` field before continuing.
 
 ## Stage 6: build
+
+First call `list_revisions` and set `startRevision` in `build-args.json` to the current revision: server housekeeping can move it between steps. Do the same before every later workflow run.
 
 If the Workflow tool is available, run it (otherwise see "Without the Workflow tool" below):
 - `scriptPath`: `$KIT/workflow/build.js`
@@ -114,6 +117,8 @@ While it runs:
 - If the user reports a visual problem, diagnose it read-only and apply the fix after the workflow ends.
 - If it stops on a usage limit or a sign-out, resume with `resumeFromRunId`, the same `scriptPath` and the same args. Finished agents replay from cache and the write ledger skips files that already landed.
 
+When it finishes, write any `mainSessionWrites` yourself: batches a writer stopped because the host refused a removal, at most one per owner (a later batch for the same owner carries the earlier one's changes and replaces it). Write each batch's files in order from the current revision, log them in `MANUAL-EDITS.md`, then validate.
+
 ### Without the Workflow tool
 
 `build.js` and `review.js` are the procedure; run them by hand instead of skipping the stage. A missing Workflow tool is never a reason to skip a step, to do an agent's task yourself while a subagent tool is available, or to report a step as not done:
@@ -125,14 +130,14 @@ While it runs:
 
 ## Stage 7: review
 
-Run `$KIT/workflow/review.js` (by hand, as above, without the Workflow tool) with the same args and `startRevision` set to the build's `finalRevision`. It does:
+Run `$KIT/workflow/review.js` (by hand, as above, without the Workflow tool) with the same args and `startRevision` set to the current revision from `list_revisions`. It does:
 1. pinned renders;
 2. three critics in parallel: plan accuracy, real house / showcase, and geometry (by hand, three subagents at once, each with its prompt from `review.js`);
 3. owner fixers, through the queue;
 4. a second round for medium and high severity issues;
 5. a final validation.
 
-Afterwards, take one render batch of the round-2 fixes yourself, because the second round's fixes are not re-rendered by the workflow.
+Afterwards, write any `mainSessionWrites` as after the build, then take one render batch of the round-2 fixes yourself, because the second round's fixes are not re-rendered by the workflow.
 
 ## Stage 8: report and hand over
 
@@ -148,10 +153,10 @@ Ask the user to walk every room at standing height, and in VR if they can.
 
 ## Stage 9: feed the kit
 
-Add every product that was modelled new in this build as a module, so the next property can reuse it:
-1. Copy `$KIT/products/_template.py` to `products/<room>/<product>.py`, fill `PRODUCT` with the researched data and move the geometry from `<workDir>/gen/<area>.py` into `build()`, dropping property-specific placement (`products/README.md`).
-2. Copy `products/test_template.py` beside it as `test_<product>.py`, point it at the module, and run `python3 $KIT/tests/run_selftest.py`.
-3. Add a generic building element to `elements/` only if it is parameterised by the spec, never by this property's coordinates.
+Add every product that was modelled new in this build to the product cache (`productsDir`), so a later build that chooses the same product can reuse its geometry. The cache stays outside the kit: the kit itself never ships products.
+1. Copy `$KIT/products/_template.py` to `<productsDir>/<room>/<product>.py`, fill `PRODUCT` with the researched data and move the geometry from `<workDir>/gen/<area>.py` into `build()`, dropping property-specific placement (`products/README.md`).
+2. Copy `$KIT/products/test_template.py` beside it as `test_<product>.py`, change its import to the new module, and run it with `PROPERTY_BUILD_KIT=$KIT python3 <productsDir>/<room>/test_<product>.py`.
+3. Add a generic building element to the kit's `elements/` only if it is parameterised by the spec, never by this property's coordinates.
 4. Add any new, generally useful lesson to the README's troubleshooting list (no property names).
 
-Stage the new files only if the user agrees, and never commit without asking.
+Changes to the kit itself (elements, lessons) are staged only if the user agrees, and never committed without asking.

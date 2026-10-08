@@ -37,6 +37,7 @@ import subprocess
 import sys
 
 from lib.polygons import clip_rect, strips
+from lib.schema_check import Validator
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 FT = 0.3048
@@ -458,6 +459,7 @@ def cmd_init(a):
     # 7. build args
     args = {
         'propertyId': a.id, 'workDir': work, 'kitDir': KIT, 'planImage': plan_copy, 'brief': plan_path,
+        'productsDir': os.path.abspath(os.path.expanduser(os.environ.get('PROPERTY_BUILD_PRODUCTS') or os.path.join(root, 'products'))),
         'today': today, 'market': a.market,
         'style': a.style or 'see spec.json style',
         'lightBudget': 15, 'maxCheckRounds': 3, 'shellCheckRounds': 3, 'lightingCheckRounds': 2,
@@ -522,86 +524,6 @@ def cmd_init(a):
 
 
 # --------------------------------------------------------------------------- spec validation
-class Validator:
-    """A small JSON Schema (2020-12 subset) validator: enough for measure/spec.schema.json."""
-
-    def __init__(self, schema):
-        self.root = schema
-        self.errors = []
-
-    def ref(self, r):
-        node = self.root
-        for part in r.lstrip('#/').split('/'):
-            node = node[part]
-        return node
-
-    @staticmethod
-    def is_type(v, t):
-        return {'object': lambda: isinstance(v, dict), 'array': lambda: isinstance(v, list),
-                'string': lambda: isinstance(v, str), 'boolean': lambda: isinstance(v, bool),
-                'null': lambda: v is None,
-                'integer': lambda: isinstance(v, int) and not isinstance(v, bool),
-                'number': lambda: isinstance(v, (int, float)) and not isinstance(v, bool)}[t]()
-
-    def ok(self, v, s):
-        saved = self.errors
-        self.errors = []
-        self.check(v, s, '')
-        good = not self.errors
-        self.errors = saved
-        return good
-
-    def check(self, v, s, path):
-        if '$ref' in s:
-            self.check(v, self.ref(s['$ref']), path)
-        if 'type' in s:
-            ts = s['type'] if isinstance(s['type'], list) else [s['type']]
-            if not any(self.is_type(v, t) for t in ts):
-                self.errors.append('%s: expected %s, got %s' % (path or '/', '|'.join(ts), type(v).__name__))
-                return
-        if 'enum' in s and v not in s['enum']:
-            self.errors.append('%s: %r not one of %s' % (path, v, s['enum']))
-        if 'const' in s and v != s['const']:
-            self.errors.append('%s: must be %r' % (path, s['const']))
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            if 'exclusiveMinimum' in s and not v > s['exclusiveMinimum']:
-                self.errors.append('%s: %s must be > %s' % (path, v, s['exclusiveMinimum']))
-            if 'minimum' in s and v < s['minimum']:
-                self.errors.append('%s: %s must be >= %s' % (path, v, s['minimum']))
-            if 'maximum' in s and v > s['maximum']:
-                self.errors.append('%s: %s must be <= %s' % (path, v, s['maximum']))
-        if isinstance(v, str) and 'pattern' in s and not re.search(s['pattern'], v):
-            self.errors.append('%s: %r does not match %s' % (path, v, s['pattern']))
-        if isinstance(v, list):
-            if 'minItems' in s and len(v) < s['minItems']:
-                self.errors.append('%s: needs >= %d items' % (path, s['minItems']))
-            if 'maxItems' in s and len(v) > s['maxItems']:
-                self.errors.append('%s: needs <= %d items' % (path, s['maxItems']))
-            if isinstance(s.get('items'), dict):
-                for i, x in enumerate(v):
-                    self.check(x, s['items'], '%s/%d' % (path, i))
-        if isinstance(v, dict):
-            for k in s.get('required', []):
-                if k not in v:
-                    self.errors.append('%s: missing required "%s"' % (path or '/', k))
-            props = s.get('properties', {})
-            for k, x in v.items():
-                if k in props:
-                    self.check(x, props[k], '%s/%s' % (path, k))
-                elif isinstance(s.get('additionalProperties'), dict):
-                    self.check(x, s['additionalProperties'], '%s/%s' % (path, k))
-                elif s.get('additionalProperties') is False:
-                    self.errors.append('%s: unexpected key "%s"' % (path, k))
-        for sub in s.get('allOf', []):
-            self.check(v, sub, path)
-        if 'if' in s:
-            if self.ok(v, s['if']):
-                if 'then' in s:
-                    self.check(v, s['then'], path)
-            elif 'else' in s:
-                self.check(v, s['else'], path)
-
-
 def wall_rect(w, default_t):
     """[x1, z1, x2, z2] of a spec wall."""
     if 'line_z_outer' in w or 'line_x_outer' in w:

@@ -9,7 +9,9 @@ A *bundle* is a plain dict:
 with optional keys
     "external":        ids of nodes/resources/products that already exist on the
                        server (parents, shared geometry, catalogue entries)
-    "removeNodes":     node ids to delete (remove_scene_node, written first)
+    "removeNodes":     node ids to delete (remove_scene_node, written first). Prefer
+                       replacing a node under its existing id: a removal can be refused
+                       by the host's permissions, and it then stops the whole batch
     "removeProducts":  product keys to delete (remove_product, written last)
     "removeResources": resource ids to delete (remove_scene_resource, written last)
     "settingsPatch":   dict for update_settings (written after the nodes)
@@ -33,6 +35,11 @@ import re
 import sys
 import unicodedata
 
+try:
+    from lib.schema_check import Validator
+except ImportError:  # imported with kit/lib itself on sys.path
+    from schema_check import Validator
+
 TAU = 6.283185  # largest arc the server accepts (2*pi rounded DOWN)
 MAX_NODES = 100
 MAX_RESOURCES = 20
@@ -43,6 +50,7 @@ LAYER_GAP = 0.002  # min separation of same-facing coplanar layers in one assemb
 THIN = 0.01  # an axis thinner than this makes a part a "layer"
 ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
 FINE_KEYS = {"bias", "normalBias"}  # numbers that must keep more than 3 dp
+SCHEMA_FILE = "server-schema.json"  # get_schema's "schemas", saved in the work dir (Stage 5)
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.dirname(HERE)
 
@@ -753,9 +761,57 @@ def _refs_in_material(data):
     return [data[k] for k in ("map", "bumpMap", "normalMap", "roughnessMap", "metalnessMap", "alphaMap") if k in data]
 
 
-def validate(b, external=()):
-    """Return (errors, warnings) for a cleaned bundle."""
+def _find_up(start, name, levels=4):
+    """Path of `name` in `start` or up to levels-1 folders above it (payloads live in
+    <workDir>/payloads/<folder>), or None."""
+    d = os.path.abspath(start)
+    for _ in range(levels):
+        p = os.path.join(d, name)
+        if os.path.isfile(p):
+            return p
+        d = os.path.dirname(d)
+    return None
+
+
+def load_server_schemas(start):
+    """The "schemas" object of get_schema, saved as <workDir>/server-schema.json in Stage 5, or None."""
+    p = _find_up(start, SCHEMA_FILE)
+    if not p:
+        return None
+    with open(p) as f:
+        data = json.load(f)
+    return data.get("schemas", data)
+
+
+def _schema_errors(b, schemas):
+    """Check every resource, node, product and settings key against the server's own schemas."""
+    errors = []
+
+    def run(label, value, schema):
+        if schema:
+            errors.extend("%s: %s" % (label, e) for e in Validator(schema, optional_defaults=True).errors_for(value, schema))
+
+    for r in b.get("resources", []):
+        run(r.get("id"), r.get("data", {}), schemas.get(r.get("kind")))
+    for n in b.get("nodes", []):
+        run(n.get("id"), n, schemas.get("node"))
+    for p in b.get("products", []):
+        run("product %s" % p.get("modelKey"), p, schemas.get("product"))
+    props = (schemas.get("settings") or {}).get("properties", {})
+    for k, v in (b.get("settingsPatch") or {}).items():
+        if k not in props:
+            errors.append("settingsPatch: unknown setting %r" % k)
+        else:
+            run("settingsPatch", v, props[k])
+    return errors
+
+
+def validate(b, external=(), schemas=None):
+    """Return (errors, warnings) for a cleaned bundle. `schemas` is the get_schema "schemas" object
+    (load_server_schemas); without it only the kit's own reference and consistency checks run."""
     errors, warnings = [], []
+    if schemas:
+        errors += _schema_errors(b, schemas)
     ext = set(external) | set(b.get("external", ())) | library_ids()
     res_ids, node_ids, prod_ids = {}, {}, {}
     for kind, items, key, store in (("resource", b.get("resources", []), "id", res_ids),
@@ -776,21 +832,10 @@ def validate(b, external=()):
             t = d.get("type")
             if t == "roundedBox" and d["radius"] > min(d["dimensions"]) / 2:
                 errors.append("%s: roundedBox radius exceeds half the smallest dimension" % r["id"])
-            if t == "torus" and d.get("arc", 0) > TAU:
-                errors.append("%s: torus arc > %s" % (r["id"], TAU))
             if t == "extrude":
                 for poly in [d["points"]] + d.get("holes", []):
-                    if not 3 <= len(poly) <= 200:
-                        errors.append("%s: polygon needs 3-200 points" % r["id"])
                     if len(poly) > 1 and poly[0] == poly[-1]:
                         errors.append("%s: do not repeat the closing point" % r["id"])
-            if t == "tube" and not 2 <= len(d["points"]) <= 200:
-                errors.append("%s: tube needs 2-200 points" % r["id"])
-            if t not in ("box", "roundedBox", "sphere", "cylinder", "torus", "ring", "plane", "circle",
-                         "icosahedron", "extrude", "tube", "buffer"):
-                errors.append("%s: unknown geometry type %r" % (r["id"], t))
-            if "name" in d:
-                errors.append("%s: geometry data has no name field (strict schema)" % r["id"])
         elif r.get("kind") == "material":
             for ref in _refs_in_material(d):
                 if ref not in known_res:
@@ -801,8 +846,6 @@ def validate(b, external=()):
     known_prod = set(prod_ids) | ext
     for n in b.get("nodes", []):
         i = n.get("id")
-        if "parentId" not in n:
-            errors.append("%s: parentId is required (null for roots)" % i)
         p = n.get("parentId")
         if p is not None and p not in known_nodes:
             errors.append("%s: parent %s is not in the bundle or external" % (i, p))
@@ -814,17 +857,12 @@ def validate(b, external=()):
         if rd:
             if rd.get("geometry") not in known_res:
                 errors.append("%s: geometry %s not found" % (i, rd.get("geometry")))
-            if not rd.get("materials"):
-                errors.append("%s: render needs at least one material" % i)
             for m in rd.get("materials", []):
                 if m not in known_res:
                     errors.append("%s: material %s not found" % (i, m))
-            inst = rd.get("instances") or []
-            if len(inst) > 512:
-                errors.append("%s: more than 512 instances" % i)
-            for mtx in inst:
-                if len(mtx) != 16 or mtx[3] != 0 or mtx[7] != 0 or mtx[11] != 0 or mtx[15] != 1:
-                    errors.append("%s: instance matrix must be affine 16 numbers" % i)
+            for mtx in rd.get("instances") or []:
+                if len(mtx) == 16 and (mtx[3] != 0 or mtx[7] != 0 or mtx[11] != 0 or mtx[15] != 1):
+                    errors.append("%s: instance matrix must be affine" % i)
                     break
         lt = n.get("light")
         if lt and lt.get("targetId") and lt["targetId"] not in known_nodes:
@@ -837,15 +875,6 @@ def validate(b, external=()):
             errors.append("%s: scale must be positive (after rounding)" % i)
         if n.get("role") == "wall" and not n.get("behavior"):
             warnings.append("%s: role wall without behavior is stretched to the ceiling; give headers and sills explicit behavior with height fixed" % i)
-        if n.get("role") not in (None, "wall", "door", "floor", "glazing", "fixture"):
-            errors.append("%s: role %r not allowed" % (i, n.get("role")))
-    for pr in b.get("products", []):
-        dims = pr.get("dimensions")
-        if not dims or len(dims) != 3:
-            errors.append("product %s: dimensions [w, d, h] required" % pr.get("modelKey"))
-        for k in ("room", "item", "name", "price", "qty", "url"):
-            if k not in pr:
-                errors.append("product %s: missing %s" % (pr.get("modelKey"), k))
     if b.get("rooms") is not None and not isinstance(b.get("rooms"), list):
         errors.append("rooms must be the complete rooms array")
     return errors, warnings
@@ -938,7 +967,10 @@ def write_payloads(b, out_dir, start_index=1, external=(), layer_gap=LAYER_GAP, 
             d["arc"] = min(d["arc"], TAU)
         if d.get("type") == "roundedBox":
             d["radius"] = min(d["radius"], math.floor(min(d["dimensions"]) / 2 * 1000) / 1000)
-    errors, warnings = validate(b, external)
+    schemas = load_server_schemas(out_dir)
+    errors, warnings = validate(b, external, schemas)
+    if schemas is None:
+        warnings.append("no %s above %s: checked without the server's schema" % (SCHEMA_FILE, out_dir))
     warnings += ["cutaway: " + s for s in check_cutaway(b, ceiling_height=_spec_ceiling(out_dir))]
     if check:
         errors += ["layer: " + s for s in check_layers(b, layer_gap)]
@@ -991,7 +1023,7 @@ def lint_dir(d, external=()):
             b["nodes"] += a["nodes"]
         elif p["tool"] == "update_settings" and "settingsPatch" not in a:
             print("%s: update_settings without settingsPatch is refused" % f)
-    errors, warnings = validate(_clean(b), external)
+    errors, warnings = validate(_clean(b), external, load_server_schemas(d))
     for e in errors:
         print(("warning: " if "not found" in e or "not in the bundle" in e else "error: ") + e)
     for w in warnings:

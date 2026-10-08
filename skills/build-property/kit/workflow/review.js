@@ -39,6 +39,7 @@ const PID = A.propertyId
 const DIR = A.workDir
 const KIT = A.kitDir
 const PLAN = A.planImage
+const PRODUCTS = A.productsDir || DIR.replace(/\/[^/]+\/?$/, '/products')
 const AREAS = Array.isArray(A.areas) ? A.areas : (A.areas.areas || [])
 const ROUNDS = A.reviewRounds || 2
 const FIX_CHECKS = A.fixCheckRounds || 2
@@ -57,9 +58,9 @@ Durable working directory: ${DIR} (never write build files to /tmp or a scratchp
 - ${DIR}/spec.json: measured spec (walls, openings, rooms, drawn item footprints). Its coordinates are authoritative, including any ERRATA_READ_FIRST block.
 - Source plan image: ${PLAN}. Build brief: ${A.brief}
 - Generators in ${DIR}/gen/, written payloads in ${DIR}/payloads/<area>/, the write ledger in ${DIR}/queue-ledger.jsonl, research in ${DIR}/research/.
-- Kit: ${KIT} (lib/payload.py, products/, elements/).
+- Kit: ${KIT} (lib/payload.py, elements/). Product cache: ${PRODUCTS}.
 - Avoid get_property (~130 KB): list_revisions for the revision, get_scene_nodes (summary true for a placement list; full nodes paginated by parentId) for details, ${DIR}/rooms.json for rooms.
-${(A.knownNonIssues || []).map(s => `- Known non-issue: ${s}`).join('\n')}
+${(A.knownNonIssues || []).length ? `Decided by the owner or settled in an earlier round; never report these or ask to undo them:\n${A.knownNonIssues.map(s => `- ${s}`).join('\n')}` : ''}
 HARD RULE: do NOT call any PropertyPrompt write tool (put_scene_nodes, put_scene_resources, upsert_product, update_settings, remove_*, restore_revision, place_product) unless you are told you are THE WRITER. Reads are fine.
 `
 
@@ -68,12 +69,13 @@ FIX PAYLOADS:
 - Prefer small targeted edits. Edit the generator in ${DIR}/gen/ (or write a small fix script there) and emit ONLY the changed nodes/resources through ${KIT}/lib/payload.py:
     import sys; sys.path.insert(0, "${KIT}/lib"); from payload import *
     write_payloads(bundle, "${DIR}/payloads/<owner>-review-r<N>/", external=[existing parent/resource/product ids])
-  It strips quote/backslash characters, rounds to 3 dp, clamps torus arcs, validates references, FAILS on coplanar layers < 2 mm apart, splits and orders files. Never bypass it.
+  It strips quote/backslash characters, rounds to 3 dp, clamps torus arcs, validates against the server's schema (${DIR}/server-schema.json) and references, FAILS on coplanar layers < 2 mm apart, splits and orders files. Never bypass it.
+- Change a node by replacing it under its existing id (reuse the old child ids for the new parts). Use bundle "removeNodes" only for parts that must disappear: the host may refuse removals.
 - put_scene_nodes replaces transforms (omitted position/rotation/scale reset) and supplying render replaces it: send complete nodes, copying every field you are not changing (map get_scene_nodes object/userData/appearance output to input fields; never echo raw objects).
 - Resources must ship in the same files/batch as the nodes that use them: the server sweeps unreferenced resources.
 - Settings: bundle "settingsPatch" (and "rooms" when access points change; the update_settings call always carries settingsPatch, never "settings").
 - Keep ids in the owner's prefix. Keep collision flags honest; never disable collision to hide a problem.
-- A matching module in ${KIT}/products/ or ${KIT}/elements/ is a better replacement for a weak product model than ad-hoc tweaks.
+- A module in the product cache ${PRODUCTS} for the same researched product, or in ${KIT}/elements/, is a better replacement for a weak product model than ad-hoc tweaks.
 `
 
 const WRITE_SCHEMA = {
@@ -87,7 +89,17 @@ const WRITE_SCHEMA = {
   required: ['finalRevision', 'written', 'failed', 'notWritten'],
 }
 
-async function writeFiles(files, label) {
+// Batches stopped by a host-refused removal, at most one per owner, for the main session to write after
+// the workflow. The owner's later agents fold a pending batch into any new fixes, so the owner's next
+// batch supersedes it whatever happens: refused, it replaces it; otherwise it retires it, and whatever
+// of the new batch did not land goes through the usual failed/notWritten path. None is replayed.
+const deferred = new Map()
+function pendingText(owner) {
+  const p = deferred.get(owner)
+  return p ? `PENDING for the main session (stopped at a removal the host refused; NOT landed): ${JSON.stringify(p)}. Do not regenerate it on its own. If you produce any fix files, regenerate its changes into them as well (its removals first), because your new batch replaces it.` : ''
+}
+
+async function writeFiles(files, label, owner) {
   if (!files || !files.length) return { finalRevision: rev, written: [], failed: [], notWritten: [] }
   return queuedWrite(async () => {
     const r = await agent(`You are THE WRITER for the PropertyPrompt write queue (batch "${label}"): the only agent allowed to write right now.
@@ -97,9 +109,12 @@ ${files.map((f, i) => `${i + 1}. ${f}`).join('\n')}
 1. Make sure these PropertyPrompt tools are loaded: put_scene_resources, put_scene_nodes, upsert_product, remove_scene_node, remove_scene_resource, remove_product, update_settings, list_revisions, get_scene_nodes (in Claude Code: ToolSearch "select:mcp__PropertyPrompt__put_scene_resources,mcp__PropertyPrompt__put_scene_nodes,mcp__PropertyPrompt__upsert_product,mcp__PropertyPrompt__remove_scene_node,mcp__PropertyPrompt__remove_scene_resource,mcp__PropertyPrompt__remove_product,mcp__PropertyPrompt__update_settings,mcp__PropertyPrompt__list_revisions,mcp__PropertyPrompt__get_scene_nodes").
 2. Resume check: grep ${DIR}/queue-ledger.jsonl for batch "${label}". If some files are recorded, skip recorded non-resource files but RESEND every put_scene_resources file of the batch; start from list_revisions.
 3. For each file: cat it; it is {"tool":T,"args":A}. Call the PropertyPrompt tool T with A plus propertyId "${PID}" and expectedRevision = current revision. Copy A EXACTLY; make sure your tool input is valid JSON. Use the revision each call returns for the next, then append {"batch":"${label}","file":<path>,"revision":<rev>} as one line to ${DIR}/queue-ledger.jsonl with a shell command.
-4. If your own input fails to parse, re-read and retry (max 2). On a revision conflict, list_revisions (check with get_scene_nodes whether the file already landed) and retry once. Never call get_property. On any server rejection (schema, intersection, navigation, missing reference) do NOT edit or retry: record the verbatim error (up to ~3000 chars incl. coordinates), list remaining files as notWritten, stop.
+4. If your own input fails to parse, re-read and retry (max 2). On a revision conflict, list_revisions (check with get_scene_nodes whether the file already landed) and retry once. Never call get_property. If the host refuses a remove_* call (a permission denial, not a server error), do not retry: record that file under failed with an error starting "NEEDS_MAIN_SESSION", list the remaining files as notWritten, stop. On any server rejection (schema, intersection, navigation, missing reference) do NOT edit or retry: record the verbatim error (up to ~3000 chars incl. coordinates), list remaining files as notWritten, stop.
 Return finalRevision, written, failed, notWritten.`, M('writer', { label: `write:${label}`, phase: 'Fix', schema: WRITE_SCHEMA, effort: 'low' }))
     if (r && typeof r.finalRevision === 'number' && r.finalRevision > rev) rev = r.finalRevision
+    const refused = r ? r.failed.filter(f => /^NEEDS_MAIN_SESSION/.test(f.error)) : []
+    deferred.delete(owner)
+    if (refused.length) deferred.set(owner, { owner, batch: label, files: [...refused.map(f => f.file), ...r.notWritten] })
     log(`write ${label}: ${r ? r.written.length : 0} ok, ${r ? r.failed.length : '?'} failed, rev ${rev}`)
     return r || { finalRevision: rev, written: [], failed: [{ file: files[0], error: 'writer agent died' }], notWritten: files }
   })
@@ -173,7 +188,7 @@ Return the revision captured, the copied image paths with view names, and proble
   if (!renderRes || !renderRes.images.length) { log('render agent failed or captured nothing; stopping review'); rounds.push({ round, renderProblems: renderRes ? renderRes.problems : ['render agent died'] }); break }
 
   phase('Critique')
-  const prev = round > 1 ? `Previous round issues and what the fixers did: ${JSON.stringify(rounds[round - 2].summary)}. Check whether they are resolved.` : ''
+  const prev = round > 1 ? `Previous round issues and what the fixers did: ${JSON.stringify(rounds[round - 2].summary)}. Check whether the fixed ones are resolved. Issues the fixers rejected or deferred, with their reasons, are settled: do not report them again unless your images show something new.` : ''
   const critiques = await parallel(CRITICS.map(c => () => agent(`${COMMON}
 You are a CRITIC (${c.key}), review round ${round}. Lens: ${c.lens}
 Images (revision ${renderRes.revision}): ${JSON.stringify(renderRes.images)}. Open and look at every image. Also read ${DIR}/validation/review-r${round}.json and the source plan ${PLAN}. ${prev}
@@ -192,11 +207,13 @@ Report only issues you can see evidence for (cite image and location). Assign ea
 You are the FIXER for "${owner}" (${OWNERS[owner]}), review round ${round}.
 Critic issues (renders in ${DIR}/renders/review-r${round}-*.jpg; validation in ${DIR}/validation/review-r${round}.json):
 ${JSON.stringify(byOwner[owner], null, 1)}
+Critics work independently, so several entries can describe one problem: treat those as one issue, using all of their evidence, and list it once in fixed, rejected or deferred.
+${pendingText(owner)}
 Verify each issue first (open the cited image, read the nodes). Reject issues that are not real, with a reason. For real ones write fix payloads into ${DIR}/payloads/${owner}-review-r${round}/ and list them in files, in write order. Defer (with reason) anything that would need a large rebuild.
 ${PAYLOAD_RULES}`, M('fixer', { label: `fix:${owner}:r${round}`, phase: 'Fix', schema: FIX_SCHEMA }, owner)),
     async (fx, owner) => {
       if (!fx || !fx.files.length) return { owner, fx, write: null, check: null, unwritten: [] }
-      let w = await writeFiles(fx.files, `${owner}-review-r${round}`)
+      let w = await writeFiles(fx.files, `${owner}-review-r${round}`, owner)
       let check = null
       // every round's corrective files are written; the loop ends on a check, never on unwritten fixes
       for (let k = 1; k <= FIX_CHECKS; k++) {
@@ -205,12 +222,13 @@ ${PAYLOAD_RULES}`, M('fixer', { label: `fix:${owner}:r${round}`, phase: 'Fix', s
 You are the CHECKER for "${owner}" (${OWNERS[owner]}) after review-round-${round} fixes (check ${k}/${FIX_CHECKS}${last ? ', the LAST one: report only, generate no payloads' : ''}).
 Write result: ${JSON.stringify(w)}
 Fixes intended: ${JSON.stringify(fx.fixed)}
-1. If the write failed, read the verbatim error${last ? ' and report it with the unwritten file paths in notes' : ` and produce corrected payloads (new folder ${DIR}/payloads/${owner}-review-r${round}-c${k}/) including every not-written file still needed and the resource files those nodes use`}.
+${pendingText(owner)}
+1. If the write stopped at a removal the host refused (NEEDS_MAIN_SESSION), that batch is PENDING above: do not regenerate it; go to step 2. If it failed otherwise, read the verbatim error${last ? ' and report it with the unwritten file paths in notes' : ` and produce corrected payloads (new folder ${DIR}/payloads/${owner}-review-r${round}-c${k}/) including every not-written file still needed and the resource files those nodes use`}.
 2. Otherwise validate_property (plan true, maxIssues 200): confirm 0 errors, every room reachable, and no new issue involving your ids.${last ? ' Report regressions in notes.' : ' If something regressed, produce corrective payloads in that folder.'}
 Return ok=true with empty fixFiles when everything is fine.
 ${last ? '' : PAYLOAD_RULES}`, M('checker', { label: `check:${owner}:r${round}:${k}`, phase: 'Fix', schema: CHECK_SCHEMA }, owner))
         if (!check || check.ok || !check.fixFiles.length || last) break
-        w = await writeFiles(check.fixFiles, `${owner}-review-r${round}-c${k}`)
+        w = await writeFiles(check.fixFiles, `${owner}-review-r${round}-c${k}`, owner)
       }
       return { owner, fx, write: w, check, unwritten: (w && w.notWritten) || [] }
     },
@@ -235,5 +253,6 @@ return {
   finalRevision: rev,
   rounds,
   final,
+  mainSessionWrites: [...deferred.values()],
   notChecked: ['Interactive walkthrough at standing height in every room', 'VR test'],
 }

@@ -153,7 +153,7 @@ Ask the user to walk every room at standing height, and in VR if they can.
 
 ## Stage 9: feed the kit
 
-Add every product that was modelled new in this build to the product cache (`productsDir`), so a later build that chooses the same product can reuse its geometry. The cache stays outside the kit: the kit itself never ships products.
+List the products that were modelled new in this build and ask the user whether to add them to the product cache (`productsDir`), so a later build that chooses the same product can reuse its geometry. Add only the ones they approve; if they decline, skip steps 1 and 2. The cache stays outside the kit: the kit itself never ships products.
 1. Copy `$KIT/products/_template.py` to `<productsDir>/<room>/<product>.py`, fill `PRODUCT` with the researched data and move the geometry from `<workDir>/gen/<area>.py` into `build()`, dropping property-specific placement (`products/README.md`).
 2. Copy `$KIT/products/test_template.py` beside it as `test_<product>.py`, change its import to the new module, and run it with `PROPERTY_BUILD_KIT=$KIT python3 <productsDir>/<room>/test_<product>.py`.
 3. Add a generic building element to the kit's `elements/` only if it is parameterised by the spec, never by this property's coordinates.

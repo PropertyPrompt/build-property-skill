@@ -11,6 +11,8 @@ Builds, from any spec in the measure/spec.schema.json format:
                 walls under windows; windows with black frames, mullions, glass panes
                 (m-glass, role glazing, castShadow false) and an interior stool; front/back
                 exterior doors drawn open on the hinge side, with thresholds.
+  joints        pieces meeting end to end overlap by JOINT_OV (2 mm): corners, partition ends
+                at solid walls, headers and sill walls into the pieces beside them.
   interior      partitions snapped to the faces of the walls they meet, real gaps,
                 headers, hinged leaves drawn open on the hinge side (role door, no
                 collision; shaker or flat slab, leaf and hardware materials from the opening
@@ -55,6 +57,9 @@ KNOB_X, KNOB_Y = 0.065, 0.91                # knob from the latch edge, height
 # bifolds
 BF_T, BF_H, BF_Y = 0.025, 2.0, 0.015
 BF_MAX_FOLD = 45.0
+# wall joints: pieces that meet end to end overlap by this much, because boxes that only touch leave
+# hairline cracks along the joint (the server never reports wall-wall overlaps as intersections)
+JOINT_OV = 0.002
 
 WALL_B = behavior('ceiling', 'reduce', True, True)
 HEAD_B = behavior('fixed', 'hide', True, True)
@@ -273,19 +278,23 @@ def build_outer(spec, prefix='so-', opts=None):
     openings = []
     for W in walls:
         ops = sorted(W.w['openings'], key=lambda o: o['from'])
-        cur, k = W.lo, 1
-        for o in ops + [None]:
-            end = o['from'] if o else W.hi
+        # a trimmed end runs into the wall it meets; headers and sill walls run into the pieces beside them
+        cur, k = W.lo - (JOINT_OV if W.lo_trim else 0), 1
+        for j, o in enumerate(ops + [None]):
+            end = o['from'] if o else W.hi + (JOINT_OV if W.hi_trim else 0)
             if end - cur > EPS:
                 wall_piece('w-%s-%d' % (W.id, k), W, cur, end, 0, H, WALL_B, '%s wall %d' % (W.id.title(), k))
                 k += 1
             if o:
                 openings.append((W, o))
                 oid = o['id']
+                nxt = ops[j + 1]['from'] if j + 1 < len(ops) else W.hi
+                a = o['from'] - (JOINT_OV if o['from'] - max(cur, W.lo) > EPS or W.lo_trim and j == 0 else 0)
+                b = o['to'] + (JOINT_OV if nxt - o['to'] > EPS or W.hi_trim and j + 1 == len(ops) else 0)
                 head = o.get('head', spec['heights']['door'] if o['type'] != 'window' else spec['heights']['windowHead'])
-                wall_piece('hd-' + oid, W, o['from'], o['to'], head, H, HEAD_B, 'Header ' + oid)
+                wall_piece('hd-' + oid, W, a, b, head, H, HEAD_B, 'Header ' + oid)
                 if o['type'] == 'window':
-                    wall_piece('sl-' + oid, W, o['from'], o['to'], 0, sill_of(spec, o), SILL_B, 'Sill wall ' + oid)
+                    wall_piece('sl-' + oid, W, a, b, 0, sill_of(spec, o), SILL_B, 'Sill wall ' + oid)
                 cur = o['to']
 
     for W, o in openings:
@@ -428,11 +437,18 @@ def wall_rects(spec):
 
 
 def inner_extent(spec, w):
-    """Partition ends snapped to the near face of whatever wall they meet."""
+    """Partition ends snapped to the near face of whatever wall they meet: (a, b, a_solid, b_solid),
+    where *_solid says the wall met there is solid (no opening across the partition's thickness)."""
     ht_default = spec['wallThickness']['interior'] / 2
+    ht = w.get('thickness', 2 * ht_default) / 2
     c = w['center_z'] if w['axis'] == 'x' else w['center_x']
     a, b = w['from'], w['to']
+    a_solid = b_solid = False
     tol = 0.01
+
+    def solid(met):
+        return not any(o['from'] < c + ht and o['to'] > c - ht for o in met.get('openings', []))
+
     # outer walls: snap to the inner face when the end reaches into (or within tol of) the band
     for o in spec['outerWalls']:
         if o['axis'] == w['axis']:
@@ -442,9 +458,9 @@ def inner_extent(spec, w):
         out = o['line_z_outer'] if o['axis'] == 'x' else o['line_x_outer']
         inn = o['inner_z'] if o['axis'] == 'x' else o['inner_x']
         if inn > out and a <= inn + tol:
-            a = inn
+            a, a_solid = inn, solid(o)
         if inn < out and b >= inn - tol:
-            b = inn
+            b, b_solid = inn, solid(o)
     for p in spec['interiorWalls']:
         if p['axis'] == w['axis'] or p is w:
             continue
@@ -453,10 +469,10 @@ def inner_extent(spec, w):
         if not (p['from'] - tol <= c <= p['to'] + tol):
             continue
         if pc - pht - tol <= a <= pc + pht + tol:
-            a = pc + pht
+            a, a_solid = pc + pht, solid(p)
         if pc - pht - tol <= b <= pc + pht + tol:
-            b = pc - pht
-    return a, b
+            b, b_solid = pc - pht, solid(p)
+    return a, b, a_solid, b_solid
 
 
 def _poly_rect_overlap(poly, rect, eps=0.002):
@@ -487,13 +503,13 @@ def build_inner(spec, prefix='si-', opts=None):
     for w in spec['interiorWalls']:
         T = w.get('thickness', spec['wallThickness']['interior'])
         HT = T / 2
-        a, b = inner_extent(spec, w)
+        a, b, a_solid, b_solid = inner_extent(spec, w)
         cuts = sorted((o['from'], o['to'], o) for o in w['openings'])
-        segs, cur = [], a
+        segs, cur = [], a - (JOINT_OV if a_solid else 0)
         for f, t, o in cuts:
             segs.append((cur, f))
             cur = t
-        segs.append((cur, b))
+        segs.append((cur, b + (JOINT_OV if b_solid else 0)))
         name = w['id'].replace('-wall', '')
         segs = [(s0, s1) for s0, s1 in segs if s1 - s0 > 0.005]
         for i, (s0, s1) in enumerate(segs):
@@ -509,14 +525,19 @@ def build_inner(spec, prefix='si-', opts=None):
                 rects.append((w['center_x'] - HT, w['center_x'] + HT, s0, s1))
             A.add(sid, name='%s %d' % (w['id'], i + 1), position=pos, container='shell', role='wall',
                   render={'geometry': A.box(dims, 'g-box'), 'materials': ['m-paint']}, behavior=WALL_B)
-        for f, t, o in cuts:
+        for j, (f, t, o) in enumerate(cuts):
             gaps.append((w, o))
             head = o.get('head', spec['heights']['door'])
-            hh, L = CEIL - head, t - f
+            # run into the partition pieces beside the opening (not into a neighbouring opening)
+            prev = cuts[j - 1][1] if j else a
+            nxt = cuts[j + 1][0] if j + 1 < len(cuts) else b
+            f2 = f - (JOINT_OV if f - prev > 0.005 else 0)
+            t2 = t + (JOINT_OV if nxt - t > 0.005 else 0)
+            hh, L = CEIL - head, t2 - f2
             if w['axis'] == 'x':
-                dims, pos = [L, hh, T], [(f + t) / 2, head + hh / 2, w['center_z']]
+                dims, pos = [L, hh, T], [(f2 + t2) / 2, head + hh / 2, w['center_z']]
             else:
-                dims, pos = [T, hh, L], [w['center_x'], head + hh / 2, (f + t) / 2]
+                dims, pos = [T, hh, L], [w['center_x'], head + hh / 2, (f2 + t2) / 2]
             A.add('h-' + o['id'], name=o['id'] + ' header', position=pos, container='shell', role='wall',
                   render={'geometry': A.box(dims, 'g-box'), 'materials': ['m-paint']}, behavior=HEAD_B)
 

@@ -755,6 +755,84 @@ def check_cutaway(b, height=CUTAWAY_HEIGHT, ignore=(), ceiling_height=2.44):
             for root, ids in kept.items() if low[root] > height + 0.02]
 
 
+# ----------------------------------------------------------------------- behaviour check
+
+def _resized(n):
+    bh = n.get("behavior") or {}
+    return bh.get("height") == "ceiling" or bh.get("cutaway") == "reduce"
+
+
+def _upright(n):
+    ro = n.get("rotation") or (0, 0, 0)
+    return all(abs(math.sin(a)) < 1e-8 and math.cos(a) > 0 for a in (ro[0], ro[2]))
+
+
+def check_behavior(b, ceiling_height=None):
+    """The server's rules for nodes the viewer resizes (behavior height "ceiling" or cutaway "reduce"),
+    which it otherwise reports only at write time: not instanced, no children, no ceilingDrop, upright
+    (yaw only), geometry with positive local Y height (centred on Y=0 for "ceiling"), and parents in the
+    bundle that keep elevation (upright, position y 0, scale y 1, no ceilingDrop). With ceiling_height
+    (or settingsPatch ceilingHeight / floors), "ceiling" nodes must also match it. Returns error strings."""
+    nodes = _clean(b.get("nodes", []))
+    geos = _geometries(_clean(b.get("resources", [])))
+    by = {n["id"]: n for n in nodes}
+    settings = b.get("settingsPatch") or {}
+    ceiling_height = settings.get("ceilingHeight", ceiling_height)
+    floors = {f["id"]: f["ceilingHeight"] for f in settings.get("floors") or []}
+    has_children = {n.get("parentId") for n in nodes}
+    errors = []
+    for n in nodes:
+        if not _resized(n):
+            continue
+        i = n["id"]
+        bh = n["behavior"]
+        what = "ceiling-height" if bh.get("height") == "ceiling" else "cutaway reduce"
+        fix = "use height fixed with cutaway keep/hide, or a fixed group of separate parts"
+        rd = n.get("render") or {}
+        if rd.get("instances"):
+            errors.append("%s: %s nodes cannot be instanced; %s" % (i, what, fix))
+        if i in has_children:
+            errors.append("%s: %s nodes cannot have child nodes; %s" % (i, what, fix))
+        if "ceilingDrop" in n:
+            errors.append("%s: %s nodes cannot have ceilingDrop" % (i, what))
+        if not _upright(n):
+            errors.append("%s: %s nodes must be upright (rotation about Y only)" % (i, what))
+        g = geos.get(rd.get("geometry"))
+        lb = geometry_bounds(g) if g else None
+        if lb is None and (n.get("primitive") or {}).get("dimensions"):
+            h = n["primitive"]["dimensions"][1]
+            lb = ((0, -h / 2, 0), (0, h / 2, 0))
+        if lb is not None:
+            height = lb[1][1] - lb[0][1]
+            if height <= 0:
+                errors.append("%s: %s nodes need geometry with positive local Y height" % (i, what))
+            elif bh.get("height") == "ceiling":
+                if abs(lb[0][1] + lb[1][1]) > 0.01:
+                    errors.append("%s: ceiling-height geometry must be centred on local Y=0" % i)
+                root = n
+                while root.get("parentId") in by:
+                    root = by[root["parentId"]]
+                ceil = floors.get(root.get("floorId")) if root.get("floorId") else ceiling_height
+                sy = (n.get("scale") or (1, 1, 1))[1]
+                y = (n.get("position") or (0, 0, 0))[1]
+                if ceil and (abs(height * sy - ceil) > 0.01 or abs(y - ceil / 2) > 0.01):
+                    errors.append("%s: ceiling-height wall must be %.3f m high at y %.3f; got %.3f at y %.3f"
+                                  % (i, ceil, ceil / 2, height * sy, y))
+        seen, p = {i}, n.get("parentId")
+        while p in by and p not in seen:
+            seen.add(p)
+            q = by[p]
+            pos, sc = q.get("position") or (0, 0, 0), q.get("scale") or (1, 1, 1)
+            legacy = not q.get("behavior") and q.get("role") in ("wall", "door")
+            if not _upright(q) or abs(pos[1]) > 1e-8 or abs(sc[1] - 1) > 1e-8 or "ceilingDrop" in q \
+                    or legacy or _resized(q):
+                errors.append("%s: parent %s changes its height or elevation; use parentId null or groups "
+                              "with yaw and horizontal translation/scale only" % (i, p))
+                break
+            p = q.get("parentId")
+    return errors
+
+
 # ----------------------------------------------------------------------- validation
 
 def _refs_in_material(data):
@@ -806,12 +884,14 @@ def _schema_errors(b, schemas):
     return errors
 
 
-def validate(b, external=(), schemas=None):
+def validate(b, external=(), schemas=None, ceiling_height=None):
     """Return (errors, warnings) for a cleaned bundle. `schemas` is the get_schema "schemas" object
-    (load_server_schemas); without it only the kit's own reference and consistency checks run."""
+    (load_server_schemas); without it only the kit's own reference and consistency checks run.
+    ceiling_height (spec.json's) lets check_behavior test ceiling-height walls against it."""
     errors, warnings = [], []
     if schemas:
         errors += _schema_errors(b, schemas)
+    errors += check_behavior(b, ceiling_height)
     ext = set(external) | set(b.get("external", ())) | library_ids()
     res_ids, node_ids, prod_ids = {}, {}, {}
     for kind, items, key, store in (("resource", b.get("resources", []), "id", res_ids),
@@ -968,7 +1048,7 @@ def write_payloads(b, out_dir, start_index=1, external=(), layer_gap=LAYER_GAP, 
         if d.get("type") == "roundedBox":
             d["radius"] = min(d["radius"], math.floor(min(d["dimensions"]) / 2 * 1000) / 1000)
     schemas = load_server_schemas(out_dir)
-    errors, warnings = validate(b, external, schemas)
+    errors, warnings = validate(b, external, schemas, _spec_ceiling(out_dir, None))
     if schemas is None:
         warnings.append("no %s above %s: checked without the server's schema" % (SCHEMA_FILE, out_dir))
     warnings += ["cutaway: " + s for s in check_cutaway(b, ceiling_height=_spec_ceiling(out_dir))]
@@ -1023,7 +1103,7 @@ def lint_dir(d, external=()):
             b["nodes"] += a["nodes"]
         elif p["tool"] == "update_settings" and "settingsPatch" not in a:
             print("%s: update_settings without settingsPatch is refused" % f)
-    errors, warnings = validate(_clean(b), external, load_server_schemas(d))
+    errors, warnings = validate(_clean(b), external, load_server_schemas(d), _spec_ceiling(d, None))
     for e in errors:
         print(("warning: " if "not found" in e or "not in the bundle" in e else "error: ") + e)
     for w in warnings:
@@ -1142,6 +1222,31 @@ def _selftest():
     lamp["settingsPatch"]["floors"][0]["ceilingHeight"] = 3
     lamp["nodes"][0]["behavior"] = HIDE
     assert not check_cutaway(lamp), "hidden ceiling-mounted assemblies stay hidden"
+    # resized nodes (height ceiling / cutaway reduce): the server's rules, caught before writing
+    WALL = behavior("ceiling", "reduce", True, True)
+    REDUCE = behavior(cutaway="reduce")
+    finish = bundle([box("x-g-board", (0.1, 0.9, 0.01)), box("x-g-wall", (3, 2.44, 0.1))], [], [
+        node("x-fin", None, container="shell"),
+        node("x-boards", "x-fin", behavior=REDUCE,
+             render=render("x-g-board", "m-oak", inst_t((0, 0.45, 0), (0.2, 0.45, 0)))),
+        node("x-wall", None, position=(0, 1.22, 0), role="wall", geom="x-g-wall", mat="m-paint", behavior=WALL)])
+    errs = check_behavior(finish, 2.44)
+    assert len(errs) == 1 and errs[0].startswith("x-boards:") and "instanced" in errs[0], errs
+    try:
+        write_payloads(finish, tmp, quiet=True)
+        raise AssertionError("expected an instanced reduce failure")
+    except ValueError as e:
+        assert "cannot be instanced" in str(e)
+    assert any("must be 2.600 m high" in e for e in check_behavior(finish, 2.6))
+    bad_parent = bundle([box("x-g-wall", (3, 2.44, 0.1))], [], [
+        node("x-raised", None, position=(0, 0.1, 0)),
+        node("x-w2", "x-raised", geom="x-g-wall", mat="m-paint", behavior=REDUCE),
+        node("x-w3", None, rotation=(0.1, 0, 0), geom="x-g-wall", mat="m-paint", behavior=REDUCE),
+        node("x-w4", "x-w3", geom="x-g-wall", mat="m-paint")])
+    errs = check_behavior(bad_parent)
+    assert any(e.startswith("x-w2: parent x-raised") for e in errs), errs
+    assert any(e.startswith("x-w3:") and "upright" in e for e in errs), errs
+    assert any(e.startswith("x-w3:") and "child" in e for e in errs), errs
     # identical duplicates from placing one module twice are merged; conflicts fail
     g = box("x-g-dup", (1, 1, 1))
     assert len(merge(bundle([g]), bundle([dict(g)]))["resources"]) == 1

@@ -55,6 +55,11 @@ which rounds to 3 decimals, validates and checks coplanar layers). Ids, with the
 | `si-d-<name>` (+ `-frame [-panels] -rose -stem -knob`) | two-panel shaker leaf or flat slab (`leafStyle`, `leafMaterial`, default `m-trim`), knobs (`hardwareMaterial`, default `m-brass`), drawn open | door; no collision, `roomId` set |
 | `si-b-<name>` | bifold: two pairs of panels folded from the jambs into the room (instanced) | door; no collision |
 
+Pieces that meet end to end overlap by `JOINT_OV` (2 mm), because boxes that only touch leave
+hairline cracks: z-axis outer walls run into the x-axis walls at corners, partitions run into the
+solid wall they meet (not where it has an opening), and headers and sill walls run into the wall
+pieces beside them. The server does not report wall-wall overlaps as intersections.
+
 `<name>` is the opening id without its `door-` / `bifold-` prefix. Materials are the shared `m-*`
 library (`lib/materials.json`); publish it first. `--emit-glass-material` adds `m-glass` with
 default values (roughness 0.15, metalness 0, envMapIntensity 0.3).
